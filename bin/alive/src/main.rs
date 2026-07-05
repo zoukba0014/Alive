@@ -16,9 +16,9 @@ use std::time::Duration;
 use alive_config::Config;
 use alive_core::{Finding, Target};
 use alive_discovery::{detect, expand, parse_ports, scan_ports, Service};
-use alive_engine::run_http_template;
+use alive_engine::{run_http_template, run_tcp_template, run_tls_template};
 use alive_fingerprint::tags_for;
-use alive_protocols::HttpRunner;
+use alive_protocols::{HttpRunner, TcpRunner, TlsRunner};
 use alive_template::{check_template, load_dir, Template};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -271,6 +271,19 @@ async fn discover(args: DiscoverArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// One scan work item: a target plus how to reach it for each protocol.
+struct Job {
+    target: Target,
+    /// http(s) base URL for http templates.
+    base_url: String,
+    /// `host:port` for tcp/tls templates (when a port is known).
+    addr: Option<String>,
+    /// Tag filter from fingerprinting; `None` in direct (URL/host) mode.
+    tags: Option<HashSet<String>>,
+    /// Detected service name; `None` in direct mode.
+    service: Option<String>,
+}
+
 async fn scan(args: ScanArgs) -> Result<(), String> {
     let config = match &args.config {
         Some(p) => Config::load(p).map_err(|e| format!("config load: {e}"))?,
@@ -282,18 +295,54 @@ async fn scan(args: ScanArgs) -> Result<(), String> {
         return Err("no runnable templates".into());
     }
 
-    let runner = Arc::new(
-        HttpRunner::new(
-            Duration::from_secs(config.scan.timeout_secs),
-            config.scan.follow_redirects,
-        )
-        .map_err(|e| format!("http runner: {e}"))?,
+    let timeout = Duration::from_secs(config.scan.timeout_secs);
+    let http_runner = Arc::new(
+        HttpRunner::new(timeout, config.scan.follow_redirects)
+            .map_err(|e| format!("http runner: {e}"))?,
     );
+    let tcp_runner = Arc::new(TcpRunner::new(timeout));
+    let tls_runner = Arc::new(TlsRunner::new(timeout).map_err(|e| format!("tls runner: {e}"))?);
 
-    // Build the (target, base_url, tag-filter) work items. With --ports we
-    // discover + fingerprint first and route by tag; otherwise we scan the
-    // given URLs/hosts directly with no tag filter (M1 behaviour).
-    let mut jobs: Vec<(Target, String, Option<HashSet<String>>)> = Vec::new();
+    let jobs = build_jobs(&args, &config).await?;
+
+    let sem = Arc::new(Semaphore::new(config.scan.concurrency.max(1)));
+    let mut set = tokio::task::JoinSet::new();
+    for job in jobs {
+        let job = Arc::new(job);
+        for template in templates.iter() {
+            if let Some(tags) = &job.tags {
+                if !template_matches_tags(template, tags) {
+                    continue;
+                }
+            }
+            let template = template.clone();
+            let job = job.clone();
+            let sem = sem.clone();
+            let http_runner = http_runner.clone();
+            let tcp_runner = tcp_runner.clone();
+            let tls_runner = tls_runner.clone();
+            set.spawn(async move {
+                let _permit = sem.acquire().await.ok()?;
+                dispatch(&template, &job, &http_runner, &tcp_runner, &tls_runner).await
+            });
+        }
+    }
+
+    let mut findings: Vec<Finding> = Vec::new();
+    while let Some(joined) = set.join_next().await {
+        if let Ok(Some(f)) = joined {
+            findings.push(f);
+        }
+    }
+
+    emit(&findings, args.output);
+    Ok(())
+}
+
+/// Build scan jobs. With `--ports`, discover + fingerprint first and route by
+/// tag; otherwise scan the given URLs/hosts directly (no tag filter).
+async fn build_jobs(args: &ScanArgs, config: &Config) -> Result<Vec<Job>, String> {
+    let mut jobs = Vec::new();
     if let Some(portspec) = &args.ports {
         let ports = parse_ports(portspec).map_err(|e| format!("ports: {e}"))?;
         let mut ips: Vec<IpAddr> = args
@@ -312,54 +361,83 @@ async fn scan(args: ScanArgs) -> Result<(), String> {
         .await;
         eprintln!("discovered {} service(s)", assets.len());
         for asset in assets {
-            // M1 engine only speaks HTTP; skip non-http services (tcp/dns land in M3).
-            if !matches!(asset.service.name.as_str(), "http" | "https") {
-                continue;
-            }
-            let base = asset_base_url(&asset.service);
+            let addr = Some(format!("{}:{}", asset.service.ip, asset.service.port));
             let target = Target::new(asset.service.ip.to_string(), Some(asset.service.port));
-            jobs.push((target, base, Some(asset.tags.into_iter().collect())));
+            jobs.push(Job {
+                target,
+                base_url: asset_base_url(&asset.service),
+                addr,
+                tags: Some(asset.tags.into_iter().collect()),
+                service: Some(asset.service.name),
+            });
         }
     } else {
         for raw in &args.target {
             let (target, base) = to_target(raw);
-            jobs.push((target, base, None));
-        }
-    }
-
-    let sem = Arc::new(Semaphore::new(config.scan.concurrency.max(1)));
-    let mut set = tokio::task::JoinSet::new();
-    for (target, base, tag_filter) in jobs {
-        for template in templates.iter() {
-            if let Some(tags) = &tag_filter {
-                if !template_matches_tags(template, tags) {
-                    continue;
-                }
-            }
-            let template = template.clone();
-            let runner = runner.clone();
-            let sem = sem.clone();
-            let target = target.clone();
-            let base = base.clone();
-            set.spawn(async move {
-                let _permit = sem.acquire().await.ok()?;
-                run_http_template(&template, &target, &base, runner.as_ref())
-                    .await
-                    .ok()
-                    .flatten()
+            let addr = target_addr(&target, &base);
+            jobs.push(Job {
+                target,
+                base_url: base,
+                addr,
+                tags: None,
+                service: None,
             });
         }
     }
+    Ok(jobs)
+}
 
-    let mut findings: Vec<Finding> = Vec::new();
-    while let Some(joined) = set.join_next().await {
-        if let Ok(Some(f)) = joined {
-            findings.push(f);
+/// Run the template against a job using the runner matching its protocol block.
+async fn dispatch(
+    template: &Template,
+    job: &Job,
+    http: &HttpRunner,
+    tcp: &TcpRunner,
+    tls: &TlsRunner,
+) -> Option<Finding> {
+    if !template.http.is_empty() {
+        // Only run http templates against http-like services (or in direct mode)
+        // to avoid firing web POCs at every open port.
+        let http_ok = job
+            .service
+            .as_deref()
+            .map(|s| s == "http" || s == "https")
+            .unwrap_or(true);
+        if !http_ok {
+            return None;
         }
+        run_http_template(template, &job.target, &job.base_url, http)
+            .await
+            .ok()
+            .flatten()
+    } else if !template.tcp.is_empty() {
+        let addr = job.addr.as_deref()?;
+        run_tcp_template(template, &job.target, addr, tcp)
+            .await
+            .ok()
+            .flatten()
+    } else if !template.ssl.is_empty() {
+        let addr = job.addr.as_deref()?;
+        run_tls_template(template, &job.target, addr, tls)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
     }
+}
 
-    emit(&findings, args.output);
-    Ok(())
+/// Derive a `host:port` address for tcp/tls templates in direct mode.
+fn target_addr(target: &Target, base_url: &str) -> Option<String> {
+    if let Some(p) = target.port {
+        Some(format!("{}:{}", target.host, p))
+    } else if base_url.starts_with("https") {
+        Some(format!("{}:443", target.host))
+    } else if base_url.starts_with("http") {
+        Some(format!("{}:80", target.host))
+    } else {
+        None
+    }
 }
 
 fn emit(findings: &[Finding], format: OutputFormat) {

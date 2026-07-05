@@ -12,4 +12,7 @@ mod model;
 
 pub use check::{check_template, Compatibility};
 pub use load::{load_dir, load_file, LoadError};
-pub use model::{Condition, Extractor, HttpRequest, Info, Matcher, Part, Template};
+pub use model::{
+    Condition, DnsRequest, Extractor, HttpRequest, Info, Matcher, Part, SslRequest, TcpInput,
+    TcpRequest, Template,
+};

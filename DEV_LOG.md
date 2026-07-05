@@ -6,16 +6,41 @@ Purpose: curated handoff state for agents and developers. This is not a raw tran
 
 - Branch: `feature/rust-rewrite`
 - Goal: Rust rewrite of Alive per `ROADMAP.md`, milestone by milestone.
-- Current status: **M2 (discovery + fingerprint) complete.** `alive discover` + tag-routed `alive scan --ports` work; fingerprint-first routing in place.
-- Next action: **Start M3 — multi-protocol + DSL** (`protocols` tcp/dns/tls runners; `dsl` expression engine for `dsl:` matchers/extractors; payload attack modes). See `ROADMAP.md`.
+- Current status: **M3 (multi-protocol + DSL) complete.** http/tcp/tls runners + nuclei DSL engine; `scan` dispatches per protocol block.
+- Next action: **Start M4 — AI analysis layer (triage)** (`ai` crate: `LlmProvider` trait, local + Claude providers, sensitive→local router + redaction, `triage()` with enforced JSON schema; wire into report). See `ROADMAP.md`.
 - Blockers: none.
-- Relevant files: `crates/{discovery,fingerprint}/src/*`, `bin/alive/src/main.rs`.
+- Relevant files: `crates/{dsl,template,engine,protocols}/src/*`, `bin/alive/src/main.rs`, `pocs/redis-unauth-tcp.yaml`.
 - Relevant docs: `ROADMAP.md` (plan), `map.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
 - Last test command: `cargo test -q && cargo clippy --workspace`
-- Last test result: 28 tests passed (core 6, discovery 11, engine 2, fingerprint 7, template 2); clippy clean; fmt clean.
-- Docs sync: crate maps/specs scaffolded for discovery + fingerprint; root map refreshed.
+- Last test result: 40 tests passed; clippy 0 issues; fmt clean.
+- Docs sync: dsl crate maps/specs scaffolded; root map refreshed.
+- Deferred: DNS runner (parses, no runner yet) and HTTP payload attack modes — pick up in a later step.
 
 ## Recent Sessions
+
+### 2026-07-06 — M3 Multi-protocol + DSL
+
+#### Summary
+- Added tcp/tls protocol execution and a nuclei-style DSL expression engine.
+
+#### Changed
+- `alive-dsl` (new): `eval_bool`/`eval_string` on `evalexpr` 11 (pinned; v12 API churn),
+  VarMap from responses, ~18 DSL functions (len/contains/md5/sha*/base64/hex/url*/regex/...).
+- `alive-template`: added `Matcher::Dsl`/`Extractor::Dsl`; typed `tcp`/`dns`/`ssl` blocks; `Part::Data`.
+- `alive-engine`: protocol-agnostic `MatchInput` (one matcher path for http/tcp/tls + dsl);
+  `run_tcp_template`, `run_tls_template`; `TcpClient`/`TlsClient` traits.
+- `alive-protocols`: `TcpRunner` (escape decoding), `TlsRunner` (rustls handshake + x509 leaf extraction).
+- `bin/alive`: `scan` dispatches per protocol block via a `Job` model; http gated to http-like services.
+
+#### Decisions
+- evalexpr pinned to 11 (12 introduced `NumericTypes` generics that churn the Value/Function API).
+- DNS + HTTP payload attack modes deferred to keep the milestone green; both flagged in handoff.
+
+#### Failed Attempts
+- None (evalexpr 12 generics avoided by pinning to 11).
+
+#### Next Steps
+- M4: `ai` crate — provider-switchable LLM triage on findings.
 
 ### 2026-07-06 — M2 Discovery + fingerprint
 

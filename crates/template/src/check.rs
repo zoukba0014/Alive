@@ -1,58 +1,76 @@
-use crate::model::{Matcher, Template};
+use crate::model::{Extractor, Matcher, Template};
 
 /// Result of checking whether the engine can execute a template today.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Compatibility {
-    /// True if the template has at least one runnable http request and no
+    /// True if the template has at least one runnable protocol block and no
     /// unsupported matchers/extractors blocking evaluation.
     pub runnable: bool,
     /// Human-readable reasons a template is not (fully) runnable yet.
     pub reasons: Vec<String>,
 }
 
-/// Assess a template against the engine's current capabilities (M1: http only,
-/// status/word/regex/size matchers, regex extractor).
+/// Assess a template against the engine's current capabilities:
+/// http/tcp/ssl protocol blocks; status/word/regex/size/dsl matchers;
+/// regex/dsl extractors. (dns parses but does not execute yet.)
 pub fn check_template(t: &Template) -> Compatibility {
     let mut reasons = Vec::new();
 
-    // Unsupported top-level protocol blocks (tcp/dns/ssl/... arrive in M3).
+    // Unsupported top-level sections. Non-protocol metadata keys are ignored.
     for key in t.extra.keys() {
-        // Common non-protocol metadata keys we simply ignore.
         if matches!(
             key.as_str(),
-            "variables" | "self-contained" | "stop-at-first-match"
+            "variables" | "self-contained" | "stop-at-first-match" | "workflows"
         ) {
             continue;
         }
         reasons.push(format!("unsupported protocol/section: `{key}`"));
     }
 
-    if t.http.is_empty() {
-        reasons.push("no http block (only http is executable in M1)".to_string());
+    let executable = !t.http.is_empty() || !t.tcp.is_empty() || !t.ssl.is_empty();
+    if !executable {
+        if !t.dns.is_empty() {
+            reasons.push("dns block parses but does not execute yet".to_string());
+        } else {
+            reasons.push("no executable protocol block (http/tcp/ssl)".to_string());
+        }
     }
 
     for (i, req) in t.http.iter().enumerate() {
         if !req.raw.is_empty() {
             reasons.push(format!("http[{i}]: `raw` requests not yet supported"));
         }
-        for m in &req.matchers {
-            if !m.is_supported() {
-                reasons.push(format!("http[{i}]: unsupported matcher type"));
-            }
-            if let Matcher::Unsupported = m {
-                // already covered above
-            }
-        }
-        for e in &req.extractors {
-            if !e.is_supported() {
-                reasons.push(format!("http[{i}]: unsupported extractor type"));
-            }
-        }
+        check_matchers("http", i, &req.matchers, &req.extractors, &mut reasons);
+    }
+    for (i, req) in t.tcp.iter().enumerate() {
+        check_matchers("tcp", i, &req.matchers, &req.extractors, &mut reasons);
+    }
+    for (i, req) in t.ssl.iter().enumerate() {
+        check_matchers("ssl", i, &req.matchers, &req.extractors, &mut reasons);
     }
 
     Compatibility {
         runnable: reasons.is_empty(),
         reasons,
+    }
+}
+
+fn check_matchers(
+    proto: &str,
+    i: usize,
+    matchers: &[Matcher],
+    extractors: &[Extractor],
+    reasons: &mut Vec<String>,
+) {
+    for m in matchers {
+        if !m.is_supported() {
+            reasons.push(format!("{proto}[{i}]: unsupported matcher type"));
+        }
+    }
+    for e in extractors {
+        if !e.is_supported() {
+            reasons.push(format!("{proto}[{i}]: unsupported extractor type"));
+        }
     }
 }
 
@@ -98,7 +116,7 @@ http:
     }
 
     #[test]
-    fn flags_dsl_matcher_as_unsupported() {
+    fn dsl_matcher_is_now_runnable() {
         let yaml = r#"
 id: dsl-demo
 info:
@@ -112,7 +130,52 @@ http:
 "#;
         let p = write_tmp("dsl.yaml", yaml);
         let t = load_file(&p).unwrap();
-        let c = super::check_template(&t);
-        assert!(!c.runnable);
+        assert!(super::check_template(&t).runnable);
+    }
+
+    #[test]
+    fn parses_tcp_block_runnable() {
+        let yaml = r#"
+id: redis-info
+info:
+  name: Redis INFO
+  severity: high
+  tags: redis
+tcp:
+  - inputs:
+      - data: "INFO\r\n"
+    read-size: 2048
+    matchers:
+      - type: word
+        part: data
+        words: ["redis_version"]
+"#;
+        let p = write_tmp("redis-tcp.yaml", yaml);
+        let t = load_file(&p).unwrap();
+        assert_eq!(t.tcp.len(), 1);
+        assert_eq!(t.tcp[0].inputs[0].data.as_deref(), Some("INFO\r\n"));
+        assert!(
+            super::check_template(&t).runnable,
+            "{:?}",
+            super::check_template(&t).reasons
+        );
+    }
+
+    #[test]
+    fn parses_ssl_block_runnable() {
+        let yaml = r#"
+id: ssl-demo
+info:
+  name: SSL
+  severity: info
+ssl:
+  - matchers:
+      - type: word
+        words: ["CN="]
+"#;
+        let p = write_tmp("ssl.yaml", yaml);
+        let t = load_file(&p).unwrap();
+        assert_eq!(t.ssl.len(), 1);
+        assert!(super::check_template(&t).runnable);
     }
 }

@@ -5,9 +5,9 @@ use serde::{Deserialize, Deserializer};
 
 /// A parsed nuclei-compatible template.
 ///
-/// Only the `http` protocol block is modeled for execution in M1. Other
-/// top-level protocol keys (`tcp`, `dns`, `ssl`, ...) are captured in `extra`
-/// so the compatibility checker can report them without failing the parse.
+/// Executable protocol blocks (`http`, `tcp`, `dns`, `ssl`) are modeled as
+/// typed fields; anything else (e.g. `variables`, `workflows`) is captured in
+/// `extra` so the compatibility checker can report it without failing the parse.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Template {
     pub id: String,
@@ -15,7 +15,14 @@ pub struct Template {
     /// nuclei v3 uses `http:`; older templates use `requests:`.
     #[serde(default, alias = "requests")]
     pub http: Vec<HttpRequest>,
-    /// Any other top-level keys (e.g. `tcp`, `dns`, `ssl`, `variables`).
+    /// nuclei v3 uses `tcp:`; older templates use `network:`.
+    #[serde(default, alias = "network")]
+    pub tcp: Vec<TcpRequest>,
+    #[serde(default)]
+    pub dns: Vec<DnsRequest>,
+    #[serde(default, alias = "tls")]
+    pub ssl: Vec<SslRequest>,
+    /// Any other top-level keys (e.g. `variables`, `workflows`).
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_yaml_ng::Value>,
 }
@@ -54,6 +61,64 @@ pub struct HttpRequest {
     pub extractors: Vec<Extractor>,
 }
 
+/// A TCP/network request block: send `inputs`, read the reply, match on `data`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TcpRequest {
+    #[serde(default)]
+    pub inputs: Vec<TcpInput>,
+    /// nuclei `host` templating (e.g. `{{Hostname}}`); informational for us.
+    #[serde(default)]
+    pub host: Vec<String>,
+    #[serde(default, rename = "read-size")]
+    pub read_size: Option<usize>,
+    #[serde(default, rename = "matchers-condition")]
+    pub matchers_condition: Condition,
+    #[serde(default)]
+    pub matchers: Vec<Matcher>,
+    #[serde(default)]
+    pub extractors: Vec<Extractor>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TcpInput {
+    /// Bytes to send. Double-quoted YAML escapes (`\r\n`) are decoded by the
+    /// YAML parser; the engine additionally decodes `\xNN`/`\r`/`\n` at runtime.
+    #[serde(default)]
+    pub data: Option<String>,
+    #[serde(default)]
+    pub read: Option<usize>,
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
+}
+
+/// A DNS request block.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DnsRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, rename = "type")]
+    pub qtype: Option<String>,
+    #[serde(default, rename = "matchers-condition")]
+    pub matchers_condition: Condition,
+    #[serde(default)]
+    pub matchers: Vec<Matcher>,
+    #[serde(default)]
+    pub extractors: Vec<Extractor>,
+}
+
+/// An SSL/TLS request block: connect and match on certificate fields.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SslRequest {
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default, rename = "matchers-condition")]
+    pub matchers_condition: Condition,
+    #[serde(default)]
+    pub matchers: Vec<Matcher>,
+    #[serde(default)]
+    pub extractors: Vec<Extractor>,
+}
+
 /// Which portion of the response a matcher/extractor inspects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -64,6 +129,9 @@ pub enum Part {
     /// nuclei's `all` / `response` — status line + headers + body.
     #[serde(alias = "response")]
     All,
+    /// tcp/network primary payload (`raw`/`data`).
+    #[serde(alias = "raw")]
+    Data,
 }
 
 /// How multiple words/regexes (or matchers) combine.
@@ -108,6 +176,13 @@ pub enum Matcher {
         #[serde(default)]
         negative: bool,
     },
+    Dsl {
+        dsl: Vec<String>,
+        #[serde(default)]
+        condition: Condition,
+        #[serde(default)]
+        negative: bool,
+    },
     #[serde(other)]
     Unsupported,
 }
@@ -128,6 +203,11 @@ pub enum Extractor {
         part: Part,
         #[serde(default)]
         group: Option<usize>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    Dsl {
+        dsl: Vec<String>,
         #[serde(default)]
         name: Option<String>,
     },

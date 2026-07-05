@@ -1,28 +1,85 @@
 use alive_core::Evidence;
+use alive_dsl::{eval_bool, eval_string, DslValue, VarMap};
 use alive_template::{Condition, Extractor, HttpRequest, Matcher, Part};
 use regex::Regex;
 
 use crate::http::HttpResponse;
 
-/// Evaluate a request's matchers against a response. On success, returns the
-/// evidence snippets and any extracted values.
-///
-/// Unsupported matchers evaluate to `false` (they never satisfy a match); the
-/// `template-check` command is responsible for warning about them up front.
+/// Protocol-agnostic view of a response that matchers/extractors evaluate
+/// against. HTTP, TCP, and TLS runners all build one of these, so matcher logic
+/// (including `dsl:`) lives in exactly one place.
+pub struct MatchInput {
+    /// HTTP status; `None` for tcp/tls.
+    pub status: Option<u16>,
+    /// Primary payload: http body, tcp data, or rendered cert fields.
+    pub body: String,
+    /// Header text (http only; empty otherwise).
+    pub header: String,
+    /// Variables exposed to `dsl:` expressions.
+    pub vars: VarMap,
+}
+
+impl MatchInput {
+    /// Build from an HTTP response (status/body/headers + dsl vars).
+    pub fn from_http(resp: &HttpResponse) -> Self {
+        let header = resp.header_text();
+        let mut vars = VarMap::new();
+        vars.insert("status_code".into(), DslValue::Int(resp.status as i64));
+        vars.insert("body".into(), DslValue::Str(resp.body.clone()));
+        vars.insert("header".into(), DslValue::Str(header.clone()));
+        vars.insert("all_headers".into(), DslValue::Str(header.clone()));
+        vars.insert(
+            "content_length".into(),
+            DslValue::Int(resp.body.len() as i64),
+        );
+        Self {
+            status: Some(resp.status),
+            body: resp.body.clone(),
+            header,
+            vars,
+        }
+    }
+
+    /// Build from a raw payload (tcp `data`, or rendered tls cert fields).
+    pub fn from_data(data: &str) -> Self {
+        let mut vars = VarMap::new();
+        vars.insert("data".into(), DslValue::Str(data.to_string()));
+        vars.insert("body".into(), DslValue::Str(data.to_string()));
+        vars.insert("content_length".into(), DslValue::Int(data.len() as i64));
+        Self {
+            status: None,
+            body: data.to_string(),
+            header: String::new(),
+            vars,
+        }
+    }
+
+    fn part_text(&self, part: Part) -> String {
+        match part {
+            Part::Body | Part::Data => self.body.clone(),
+            Part::Header => self.header.clone(),
+            Part::All => format!("{}\n{}", self.header, self.body),
+        }
+    }
+}
+
+/// Evaluate matchers (+ extractors on success) against an input. Returns the
+/// evidence snippets and extracted values on a match.
 pub(crate) fn evaluate(
-    req: &HttpRequest,
-    resp: &HttpResponse,
+    matchers: &[Matcher],
+    condition: Condition,
+    extractors: &[Extractor],
+    input: &MatchInput,
 ) -> Option<(Vec<Evidence>, Vec<String>)> {
-    if req.matchers.is_empty() {
+    if matchers.is_empty() {
         return None;
     }
 
     let mut evidence = Vec::new();
     let mut any = false;
     let mut all = true;
-
-    for m in &req.matchers {
-        let (matched, ev) = eval_matcher(m, resp);
+    for m in matchers {
+        let (matched, ev) = eval_matcher(m, input);
         any |= matched;
         all &= matched;
         if matched {
@@ -30,7 +87,7 @@ pub(crate) fn evaluate(
         }
     }
 
-    let ok = match req.matchers_condition {
+    let ok = match condition {
         Condition::And => all,
         Condition::Or => any,
     };
@@ -38,30 +95,40 @@ pub(crate) fn evaluate(
         return None;
     }
 
-    let extracted = req
-        .extractors
+    let extracted = extractors
         .iter()
-        .flat_map(|e| run_extractor(e, resp))
+        .flat_map(|e| run_extractor(e, input))
         .collect();
     Some((evidence, extracted))
 }
 
-fn part_text(part: Part, resp: &HttpResponse) -> String {
-    match part {
-        Part::Body => resp.body.clone(),
-        Part::Header => resp.header_text(),
-        Part::All => resp.all_text(),
-    }
+/// HTTP convenience wrapper used by `run_http_template`.
+pub(crate) fn evaluate_http(
+    req: &HttpRequest,
+    resp: &HttpResponse,
+) -> Option<(Vec<Evidence>, Vec<String>)> {
+    let input = MatchInput::from_http(resp);
+    evaluate(
+        &req.matchers,
+        req.matchers_condition,
+        &req.extractors,
+        &input,
+    )
 }
 
-fn eval_matcher(m: &Matcher, resp: &HttpResponse) -> (bool, Vec<Evidence>) {
+fn eval_matcher(m: &Matcher, input: &MatchInput) -> (bool, Vec<Evidence>) {
     match m {
         Matcher::Status { status, negative } => {
-            let hit = status.contains(&resp.status);
-            let ev = vec![Evidence {
-                part: "status".into(),
-                snippet: resp.status.to_string(),
-            }];
+            let hit = input.status.map(|s| status.contains(&s)).unwrap_or(false);
+            let ev = input
+                .status
+                .map(|s| {
+                    vec![Evidence {
+                        part: "status".into(),
+                        snippet: s.to_string(),
+                    }]
+                })
+                .unwrap_or_default();
             (hit ^ negative, if hit { ev } else { vec![] })
         }
         Matcher::Word {
@@ -70,7 +137,7 @@ fn eval_matcher(m: &Matcher, resp: &HttpResponse) -> (bool, Vec<Evidence>) {
             condition,
             negative,
         } => {
-            let text = part_text(*part, resp);
+            let text = input.part_text(*part);
             let hits: Vec<&String> = words.iter().filter(|w| text.contains(w.as_str())).collect();
             let matched = match condition {
                 Condition::And => hits.len() == words.len(),
@@ -91,7 +158,7 @@ fn eval_matcher(m: &Matcher, resp: &HttpResponse) -> (bool, Vec<Evidence>) {
             condition,
             negative,
         } => {
-            let text = part_text(*part, resp);
+            let text = input.part_text(*part);
             let mut matched_count = 0usize;
             let mut ev = Vec::new();
             for pat in regex {
@@ -112,19 +179,43 @@ fn eval_matcher(m: &Matcher, resp: &HttpResponse) -> (bool, Vec<Evidence>) {
             (matched ^ negative, if matched { ev } else { vec![] })
         }
         Matcher::Size { size, negative } => {
-            let hit = size.contains(&resp.body.len());
+            let hit = size.contains(&input.body.len());
             (hit ^ negative, vec![])
+        }
+        Matcher::Dsl {
+            dsl,
+            condition,
+            negative,
+        } => {
+            let results: Vec<bool> = dsl.iter().map(|e| eval_bool(e, &input.vars)).collect();
+            let matched = match condition {
+                Condition::And => results.iter().all(|&b| b),
+                Condition::Or => results.iter().any(|&b| b),
+            };
+            let ev = if matched {
+                dsl.iter()
+                    .zip(&results)
+                    .filter(|(_, &r)| r)
+                    .map(|(e, _)| Evidence {
+                        part: "dsl".into(),
+                        snippet: truncate(e, 200),
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
+            (matched ^ negative, ev)
         }
         Matcher::Unsupported => (false, vec![]),
     }
 }
 
-fn run_extractor(e: &Extractor, resp: &HttpResponse) -> Vec<String> {
+fn run_extractor(e: &Extractor, input: &MatchInput) -> Vec<String> {
     match e {
         Extractor::Regex {
             regex, part, group, ..
         } => {
-            let text = part_text(*part, resp);
+            let text = input.part_text(*part);
             let mut out = Vec::new();
             for pat in regex {
                 if let Ok(re) = Regex::new(pat) {
@@ -138,6 +229,11 @@ fn run_extractor(e: &Extractor, resp: &HttpResponse) -> Vec<String> {
             }
             out
         }
+        Extractor::Dsl { dsl, .. } => dsl
+            .iter()
+            .filter_map(|expr| eval_string(expr, &input.vars))
+            .map(|s| truncate(&s, 200))
+            .collect(),
         Extractor::Unsupported => vec![],
     }
 }
@@ -147,6 +243,7 @@ fn part_name(part: Part) -> &'static str {
         Part::Body => "body",
         Part::Header => "header",
         Part::All => "all",
+        Part::Data => "data",
     }
 }
 
@@ -154,7 +251,11 @@ fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max])
+        let mut end = max;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &s[..end])
     }
 }
 
@@ -162,7 +263,7 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
-    fn resp(status: u16, body: &str) -> HttpResponse {
+    fn http(status: u16, body: &str) -> HttpResponse {
         HttpResponse {
             status,
             headers: vec![("Server".into(), "nginx".into())],
@@ -200,8 +301,8 @@ mod tests {
             ],
             Condition::And,
         );
-        assert!(evaluate(&r, &resp(200, "hello world")).is_some());
-        assert!(evaluate(&r, &resp(404, "hello world")).is_none());
+        assert!(evaluate_http(&r, &http(200, "hello world")).is_some());
+        assert!(evaluate_http(&r, &http(404, "hello world")).is_none());
     }
 
     #[test]
@@ -215,7 +316,33 @@ mod tests {
             }],
             Condition::And,
         );
-        assert!(evaluate(&r, &resp(200, "welcome")).is_some());
-        assert!(evaluate(&r, &resp(200, "forbidden")).is_none());
+        assert!(evaluate_http(&r, &http(200, "welcome")).is_some());
+        assert!(evaluate_http(&r, &http(200, "forbidden")).is_none());
+    }
+
+    #[test]
+    fn dsl_matcher_over_http() {
+        let r = req(
+            vec![Matcher::Dsl {
+                dsl: vec!["status_code == 200 && contains(body, \"root:\")".into()],
+                condition: Condition::And,
+                negative: false,
+            }],
+            Condition::And,
+        );
+        assert!(evaluate_http(&r, &http(200, "root:x:0:0")).is_some());
+        assert!(evaluate_http(&r, &http(200, "nope")).is_none());
+    }
+
+    #[test]
+    fn word_matcher_over_tcp_data() {
+        let input = MatchInput::from_data("$2437\r\nredis_version:7.0.0\r\n");
+        let matchers = vec![Matcher::Word {
+            words: vec!["redis_version".into()],
+            part: Part::Data,
+            condition: Condition::And,
+            negative: false,
+        }];
+        assert!(evaluate(&matchers, Condition::And, &[], &input).is_some());
     }
 }

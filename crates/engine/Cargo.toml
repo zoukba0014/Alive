@@ -10,5 +10,6 @@ description = "Executes nuclei-compatible templates: matchers, extractors, and p
 [dependencies]
 alive-core = { workspace = true }
 alive-template = { workspace = true }
+alive-dsl = { workspace = true }
 regex = { workspace = true }
 async-trait = { workspace = true }

@@ -1,0 +1,29 @@
+id: redis-unauth-tcp
+info:
+  name: Redis unauthorized access (INFO)
+  author: alive
+  severity: high
+  tags: redis,unauth,network
+  description: >
+    Sends an inline Redis INFO command; an unauthenticated Redis replies with a
+    server info bulk string containing `redis_version`.
+tcp:
+  - inputs:
+      - data: "INFO\r\n"
+    read-size: 2048
+    matchers-condition: or
+    matchers:
+      - type: word
+        part: data
+        words:
+          - "redis_version"
+          - "# Server"
+      - type: dsl
+        dsl:
+          - "contains(data, \"redis_version\")"
+    extractors:
+      - type: regex
+        part: data
+        regex:
+          - "redis_version:([0-9.]+)"
+        group: 1

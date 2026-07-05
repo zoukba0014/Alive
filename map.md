@@ -21,6 +21,7 @@ Navigation layer for this repository. Read this first, then route to the smalles
 | `alive-config` | `crates/config` | TODO | `crates/config/map.md` |
 | `alive-core` | `crates/core` | TODO | `crates/core/map.md` |
 | `alive-discovery` | `crates/discovery` | TODO | `crates/discovery/map.md` |
+| `alive-dsl` | `crates/dsl` | TODO | `crates/dsl/map.md` |
 | `alive-engine` | `crates/engine` | TODO | `crates/engine/map.md` |
 | `alive-fingerprint` | `crates/fingerprint` | TODO | `crates/fingerprint/map.md` |
 | `alive-protocols` | `crates/protocols` | TODO | `crates/protocols/map.md` |
