@@ -1,0 +1,12 @@
+[package]
+name = "alive-fingerprint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Service fingerprinting: favicon mmh3 hashing and service/banner → nuclei tag routing."
+
+[dependencies]
+murmur3 = { workspace = true }
+base64 = { workspace = true }

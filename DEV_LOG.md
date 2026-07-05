@@ -6,16 +6,41 @@ Purpose: curated handoff state for agents and developers. This is not a raw tran
 
 - Branch: `feature/rust-rewrite`
 - Goal: Rust rewrite of Alive per `ROADMAP.md`, milestone by milestone.
-- Current status: **M1 (scan engine foundation) complete.** `alive scan` + `alive template-check` work end-to-end; verified against a live HTTP target.
-- Next action: **Start M2 — discovery + fingerprint** (`discovery`: ICMP alive + async connect port scan + service detect; `fingerprint`: banner + favicon mmh3 → tag routing). See `ROADMAP.md`.
+- Current status: **M2 (discovery + fingerprint) complete.** `alive discover` + tag-routed `alive scan --ports` work; fingerprint-first routing in place.
+- Next action: **Start M3 — multi-protocol + DSL** (`protocols` tcp/dns/tls runners; `dsl` expression engine for `dsl:` matchers/extractors; payload attack modes). See `ROADMAP.md`.
 - Blockers: none.
-- Relevant files: `crates/{config,template,engine,protocols}/src/*`, `bin/alive/src/main.rs`, `pocs/`.
+- Relevant files: `crates/{discovery,fingerprint}/src/*`, `bin/alive/src/main.rs`.
 - Relevant docs: `ROADMAP.md` (plan), `map.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
 - Last test command: `cargo test -q && cargo clippy --workspace`
-- Last test result: 10 tests passed (core 6, engine 2, template 2); clippy clean; fmt clean.
-- Docs sync: crate maps/specs scaffolded for all M1 crates; root map refreshed.
+- Last test result: 28 tests passed (core 6, discovery 11, engine 2, fingerprint 7, template 2); clippy clean; fmt clean.
+- Docs sync: crate maps/specs scaffolded for discovery + fingerprint; root map refreshed.
 
 ## Recent Sessions
+
+### 2026-07-06 — M2 Discovery + fingerprint
+
+#### Summary
+- Added asset discovery + fingerprint-first tag routing.
+
+#### Changed
+- `alive-discovery`: `expand` (IP/CIDR/range), `parse_ports` (`80,443,8000-9000`),
+  `scan_ports` (async connect, Semaphore+JoinSet), `ping` (surge-ping ICMP, best-effort),
+  `service::detect` (well-known-port table + best-effort banner grab).
+- `alive-fingerprint`: `favicon_hash` (Shodan mmh3: python-style base64 encodebytes + murmur3),
+  `tags_for(service, banner)` → nuclei tags.
+- `bin/alive`: new `discover` subcommand; `scan --ports` discovers+fingerprints then routes
+  POCs by tag (`template_matches_tags`: untagged/generic templates always run).
+
+#### Decisions
+- Connect-scan liveness is the privilege-free default; ICMP is optional and degrades to it.
+- `scan` skips non-HTTP services for now (engine speaks only HTTP until M3).
+- `expand` rejects hostnames on purpose; CLI DNS-resolves them in `resolve_targets`.
+
+#### Failed Attempts
+- None.
+
+#### Next Steps
+- M3: tcp/dns/tls runners + `dsl` expression engine + payload attack modes.
 
 ### 2026-07-06 — M1 Scan engine foundation
 

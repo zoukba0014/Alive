@@ -6,6 +6,8 @@ members = [
     "crates/template",
     "crates/engine",
     "crates/protocols",
+    "crates/discovery",
+    "crates/fingerprint",
     "bin/alive",
 ]
 
@@ -31,12 +33,19 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 walkdir = "2"
 clap = { version = "4", features = ["derive"] }
+# Network discovery / fingerprinting
+ipnet = "2"
+surge-ping = "0.8"
+murmur3 = "0.5"
+base64 = "0.22"
 # Internal crates
 alive-core = { path = "crates/core" }
 alive-config = { path = "crates/config" }
 alive-template = { path = "crates/template" }
 alive-engine = { path = "crates/engine" }
 alive-protocols = { path = "crates/protocols" }
+alive-discovery = { path = "crates/discovery" }
+alive-fingerprint = { path = "crates/fingerprint" }
 
 [profile.release]
 strip = true
