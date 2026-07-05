@@ -17,12 +17,17 @@ use alive_ai::{
     ClaudeProvider, LlmProvider, LocalProvider, ProviderKind, ProviderRouter, RoutingPolicy,
     TriageRequest, TriageVerdict,
 };
+use alive_brute::{
+    load_creds_file, run_brute, wellknown_defaults, BruteConfig, BruteService, FtpService,
+    RedisService,
+};
 use alive_config::{Config, ProviderChoice};
 use alive_core::{Finding, Target};
 use alive_discovery::{detect, expand, parse_ports, scan_ports, Service};
 use alive_engine::{run_http_template, run_tcp_template, run_tls_template};
 use alive_fingerprint::tags_for;
 use alive_protocols::{HttpRunner, TcpRunner, TlsRunner};
+use alive_report::ReportFormat;
 use alive_template::{check_template, load_dir, Template};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -41,6 +46,8 @@ enum Command {
     Scan(ScanArgs),
     /// Discover live hosts, open ports, and services.
     Discover(DiscoverArgs),
+    /// Bounded weak-credential checks against an authorized target scope.
+    Brute(BruteArgs),
     /// Report template compatibility with the current engine.
     TemplateCheck(TemplateCheckArgs),
 }
@@ -66,6 +73,9 @@ struct ScanArgs {
     /// Output format.
     #[arg(long, default_value = "text")]
     output: OutputFormat,
+    /// Write the report to this file instead of stdout.
+    #[arg(short = 'o', long)]
+    output_file: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -94,10 +104,83 @@ struct TemplateCheckArgs {
     templates: PathBuf,
 }
 
+#[derive(Parser)]
+struct BruteArgs {
+    /// Target(s): `host` or `host:port`. Repeatable / comma-separated.
+    /// Only these targets are probed — brute never discovers its own.
+    #[arg(short, long, value_delimiter = ',', required = true)]
+    target: Vec<String>,
+    /// Service to check.
+    #[arg(long)]
+    service: BruteServiceKind,
+    /// Port override (defaults to the service's well-known port).
+    #[arg(short, long)]
+    port: Option<u16>,
+    /// Credentials file (`user:pass` per line). Required unless --use-default-creds.
+    #[arg(long)]
+    creds: Option<PathBuf>,
+    /// Opt in to the tiny built-in well-known-defaults credential set.
+    #[arg(long)]
+    use_default_creds: bool,
+    /// Max credentials tried per target (0 = all supplied).
+    #[arg(long, default_value_t = 50)]
+    max_attempts: usize,
+    /// Max targets probed concurrently.
+    #[arg(long, default_value_t = 8)]
+    concurrency: usize,
+    /// Delay between attempts against the same target (ms).
+    #[arg(long, default_value_t = 200)]
+    delay_ms: u64,
+    /// Per-connection timeout (seconds).
+    #[arg(long, default_value_t = 5)]
+    timeout: u64,
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    output: OutputFormat,
+    /// Write the report to this file instead of stdout.
+    #[arg(short = 'o', long)]
+    output_file: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum BruteServiceKind {
+    Redis,
+    Ftp,
+}
+
+impl BruteServiceKind {
+    fn default_port(self) -> u16 {
+        match self {
+            BruteServiceKind::Redis => 6379,
+            BruteServiceKind::Ftp => 21,
+        }
+    }
+    fn service(self) -> Box<dyn BruteService> {
+        match self {
+            BruteServiceKind::Redis => Box::new(RedisService),
+            BruteServiceKind::Ftp => Box::new(FtpService),
+        }
+    }
+}
+
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum OutputFormat {
     Text,
     Json,
+    Csv,
+    Html,
+}
+
+impl OutputFormat {
+    /// Map to a structured report format; `Text` has no structured equivalent.
+    fn as_report(self) -> Option<ReportFormat> {
+        match self {
+            OutputFormat::Json => Some(ReportFormat::Json),
+            OutputFormat::Csv => Some(ReportFormat::Csv),
+            OutputFormat::Html => Some(ReportFormat::Html),
+            OutputFormat::Text => None,
+        }
+    }
 }
 
 /// A discovered asset: a detected service plus its routed nuclei tags.
@@ -114,6 +197,7 @@ async fn main() -> ExitCode {
     let result = match cli.command {
         Command::Scan(args) => scan(args).await,
         Command::Discover(args) => discover(args).await,
+        Command::Brute(args) => brute(args).await,
         Command::TemplateCheck(args) => template_check(args),
     };
     match result {
@@ -342,11 +426,19 @@ async fn scan(args: ScanArgs) -> Result<(), String> {
         }
     }
 
-    if (config.ai.enabled || args.ai) && !findings.is_empty() {
+    // Rich per-finding triage output is only for interactive text/json to
+    // stdout; structured reports (csv/html) and file output go through the
+    // report crate on the raw findings (triage annotations there is a TODO).
+    let ai_on = config.ai.enabled || args.ai;
+    let rich = ai_on
+        && !findings.is_empty()
+        && matches!(args.output, OutputFormat::Text | OutputFormat::Json)
+        && args.output_file.is_none();
+    if rich {
         let triaged = run_triage(findings, &config).await;
         emit_triaged(&triaged, args.output);
     } else {
-        emit(&findings, args.output);
+        report_findings(&findings, args.output, args.output_file.as_deref())?;
     }
     Ok(())
 }
@@ -479,7 +571,9 @@ async fn run_triage(findings: Vec<Finding>, config: &Config) -> Vec<TriagedFindi
 
 fn emit_triaged(items: &[TriagedFinding], format: OutputFormat) {
     match format {
-        OutputFormat::Json => {
+        // csv/html aren't reached here (the scan path routes them to
+        // report_findings), but keep the match exhaustive with a json fallback.
+        OutputFormat::Json | OutputFormat::Csv | OutputFormat::Html => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(items).unwrap_or_default()
@@ -615,31 +709,57 @@ fn target_addr(target: &Target, base_url: &str) -> Option<String> {
     }
 }
 
-fn emit(findings: &[Finding], format: OutputFormat) {
-    match format {
-        OutputFormat::Json => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(findings).unwrap_or_default()
-            );
+/// Emit findings as text (stdout lines) or a structured report (json/csv/html),
+/// to `output_file` when given, else stdout.
+fn report_findings(
+    findings: &[Finding],
+    format: OutputFormat,
+    output_file: Option<&std::path::Path>,
+) -> Result<(), String> {
+    // Text has no structured report form: lines to stdout, or a plain dump to file.
+    let Some(report_format) = format.as_report() else {
+        let mut body = String::new();
+        for f in findings {
+            body.push_str(&format!(
+                "[{}] {} — {} ({})\n",
+                f.severity, f.template_id, f.target, f.name
+            ));
         }
-        OutputFormat::Text => {
-            if findings.is_empty() {
-                eprintln!("no findings");
+        match output_file {
+            Some(p) => {
+                std::fs::write(p, body).map_err(|e| format!("write {}: {e}", p.display()))?
             }
-            for f in findings {
-                println!(
-                    "[{}] {} — {} ({})",
-                    f.severity, f.template_id, f.target, f.name
-                );
+            None => {
+                if findings.is_empty() {
+                    eprintln!("no findings");
+                } else {
+                    print!("{body}");
+                }
             }
+        }
+        return Ok(());
+    };
+
+    match output_file {
+        Some(p) => {
+            alive_report::write_report(findings, report_format, p)
+                .map_err(|e| format!("write {}: {e}", p.display()))?;
+            eprintln!("wrote {} finding(s) to {}", findings.len(), p.display());
+        }
+        None => {
+            let body = alive_report::render(findings, report_format)
+                .map_err(|e| format!("render report: {e}"))?;
+            println!("{body}");
         }
     }
+    Ok(())
 }
 
 fn emit_assets(assets: &[Asset], format: OutputFormat) {
     match format {
-        OutputFormat::Json => {
+        // Assets aren't findings; csv/html reports are finding-shaped, so fall
+        // back to json for structured discover output.
+        OutputFormat::Json | OutputFormat::Csv | OutputFormat::Html => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(assets).unwrap_or_default()
@@ -662,6 +782,64 @@ fn emit_assets(assets: &[Asset], format: OutputFormat) {
             }
         }
     }
+}
+
+async fn brute(args: BruteArgs) -> Result<(), String> {
+    // Credentials come from an explicit file, or the opt-in well-known set —
+    // never a large implicit list. See WORKSPACE_SPEC safety controls.
+    let creds = if let Some(path) = &args.creds {
+        load_creds_file(path).map_err(|e| format!("creds: {e}"))?
+    } else if args.use_default_creds {
+        eprintln!("using built-in well-known default credentials (opt-in)");
+        wellknown_defaults()
+    } else {
+        return Err("provide --creds <file> or --use-default-creds".into());
+    };
+    if creds.is_empty() {
+        return Err("no credentials to try".into());
+    }
+
+    let port = args.port.unwrap_or(args.service.default_port());
+    let targets: Vec<(String, u16)> = args
+        .target
+        .iter()
+        .map(|t| parse_brute_target(t, port))
+        .collect();
+
+    let service: Arc<dyn BruteService> = Arc::from(args.service.service());
+    let config = BruteConfig {
+        max_attempts: args.max_attempts,
+        concurrency: args.concurrency,
+        delay: Duration::from_millis(args.delay_ms),
+        timeout: Duration::from_secs(args.timeout),
+    };
+    let per_target = if config.max_attempts == 0 {
+        creds.len()
+    } else {
+        config.max_attempts.min(creds.len())
+    };
+    eprintln!(
+        "brute {}: {} target(s) × up to {} cred(s)",
+        service.name(),
+        targets.len(),
+        per_target
+    );
+
+    let findings = run_brute(targets, service, Arc::new(creds), config).await;
+    report_findings(&findings, args.output, args.output_file.as_deref())
+}
+
+/// Parse a brute target `host` or `host:port`, defaulting the port.
+fn parse_brute_target(raw: &str, default_port: u16) -> (String, u16) {
+    let raw = raw.trim();
+    if raw.matches(':').count() == 1 {
+        if let Some((h, p)) = raw.split_once(':') {
+            if let Ok(port) = p.parse() {
+                return (h.to_string(), port);
+            }
+        }
+    }
+    (raw.to_string(), default_port)
 }
 
 fn template_check(args: TemplateCheckArgs) -> Result<(), String> {

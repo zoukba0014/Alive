@@ -6,17 +6,41 @@ Purpose: curated handoff state for agents and developers. This is not a raw tran
 
 - Branch: `feature/rust-rewrite`
 - Goal: Rust rewrite of Alive per `ROADMAP.md`, milestone by milestone.
-- Current status: **M4 (AI triage layer) complete.** `alive-ai` provider-switchable triage (local + Claude), sensitive→local routing + redaction, wired into `scan --ai`.
-- Next action: **Start M5 — brute + report + OOB** (`brute`: SSH/MySQL/Redis/... allowlisted creds; `report`: json/csv/html; `oob`: interactsh). See `ROADMAP.md`.
+- Current status: **M5 (brute + report + OOB) complete.** Standalone scanner is feature-complete (discovery → protocols → fingerprint → engine → AI triage → brute → reports).
+- Next action: **Start M6 — fleet foundation** (`proto`: gRPC + fixed TaskType catalog; `transport`: mTLS + enrollment + ed25519 task signing; `bin/alive-server`: scheduler/dispatch/ingest/audit; `bin/alive-agent`: enroll → long-lived bidi stream → execute → local buffer). See `ROADMAP.md`. Comms: long-lived gRPC bidi stream, server pushes.
 - Blockers: none.
-- Relevant files: `crates/ai/src/*`, `crates/config/src/lib.rs`, `bin/alive/src/main.rs`, `configs/alive.example.yaml`.
+- Relevant files: `crates/{report,brute,oob}/src/*`, `bin/alive/src/main.rs`.
 - Relevant docs: `ROADMAP.md` (plan), `map.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
 - Last test command: `cargo test -q && cargo clippy --workspace`
-- Last test result: 52 tests passed; clippy 0 issues; fmt clean.
-- Docs sync: ai crate maps/specs scaffolded; root map refreshed.
-- Deferred (still open): DNS runner + HTTP payload attack modes (from M3). Live LLM triage not exercised in tests (needs network/keys) — plumbing covered by FakeProvider.
+- Last test result: 61 tests passed; clippy 0 issues; fmt clean.
+- Docs sync: report/brute/oob crate maps/specs scaffolded; root map refreshed.
+- Deferred (still open): DNS runner + HTTP payload attack modes (M3); SSH brute service (russh, C-dep avoidance); full interactsh RSA crypto (M5, HTTP-poll client shipped); triage annotations in csv/html reports (raw findings only there for now).
 
 ## Recent Sessions
+
+### 2026-07-06 — M5 Brute + report + OOB
+
+#### Summary
+- Completed the standalone scanner: credential checks, multi-format reports, OOB client.
+
+#### Changed
+- `alive-report` (new): json/csv/html emitters; self-contained HTML (severity summary + table).
+- `alive-brute` (new): `BruteService` trait + Redis/FTP (pure tokio, no C deps); allowlisted
+  `CredentialSource`; bounded `run_brute` (max-attempts + concurrency + delay, stop-on-first-success).
+- `alive-oob` (new): `OobClient` trait + `HttpOobClient` (correlation-id payloads + HTTP poll).
+- `bin/alive`: `brute` subcommand; `--output csv|html` + `-o/--output-file` on scan/brute.
+
+#### Decisions
+- Safety: no built-in wordlist; creds only from `--creds` file or opt-in `--use-default-creds`;
+  brute never discovers targets; conservative bounded defaults (50 attempts / 8 conc / 200ms).
+- SSH brute deferred (russh C-dep/compile risk); interactsh RSA crypto deferred (HTTP-poll shipped) —
+  both drop-in behind their traits.
+
+#### Failed Attempts
+- None.
+
+#### Next Steps
+- M6: fleet foundation — `proto` + `transport` (mTLS/signing) + `alive-server` + `alive-agent` (gRPC stream).
 
 ### 2026-07-06 — M4 AI triage layer
 

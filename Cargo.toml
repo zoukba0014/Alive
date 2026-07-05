@@ -10,6 +10,9 @@ members = [
     "crates/discovery",
     "crates/fingerprint",
     "crates/ai",
+    "crates/report",
+    "crates/brute",
+    "crates/oob",
     "bin/alive",
 ]
 
@@ -35,6 +38,7 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json"] }
 walkdir = "2"
 clap = { version = "4", features = ["derive"] }
+csv = "1"
 # Network discovery / fingerprinting
 ipnet = "2"
 surge-ping = "0.8"
@@ -62,6 +66,9 @@ alive-protocols = { path = "crates/protocols" }
 alive-discovery = { path = "crates/discovery" }
 alive-fingerprint = { path = "crates/fingerprint" }
 alive-ai = { path = "crates/ai" }
+alive-report = { path = "crates/report" }
+alive-brute = { path = "crates/brute" }
+alive-oob = { path = "crates/oob" }
 
 [profile.release]
 strip = true
