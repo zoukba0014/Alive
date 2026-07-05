@@ -1,0 +1,15 @@
+[package]
+name = "alive-protocols"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Concrete protocol runners (M1: HTTP via reqwest) implementing the engine's transport traits."
+
+[dependencies]
+alive-core = { workspace = true }
+alive-engine = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }

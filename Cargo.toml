@@ -2,6 +2,11 @@
 resolver = "2"
 members = [
     "crates/core",
+    "crates/config",
+    "crates/template",
+    "crates/engine",
+    "crates/protocols",
+    "bin/alive",
 ]
 
 [workspace.package]
@@ -16,11 +21,22 @@ repository = "https://github.com/zoukba0014/Alive"
 # Core / serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml_ng = "0.10"       # maintained fork; upstream serde_yaml is archived
 thiserror = "2"
-# Async runtime (used from M1 onward)
+# Async runtime
 tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+# Matching / IO
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+walkdir = "2"
+clap = { version = "4", features = ["derive"] }
 # Internal crates
 alive-core = { path = "crates/core" }
+alive-config = { path = "crates/config" }
+alive-template = { path = "crates/template" }
+alive-engine = { path = "crates/engine" }
+alive-protocols = { path = "crates/protocols" }
 
 [profile.release]
 strip = true

@@ -1,0 +1,26 @@
+id: http-title-example
+info:
+  name: Example Domain title detection
+  author: alive
+  severity: info
+  tags: http,demo
+  description: Demo template that matches the IANA example page.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Example Domain"
+    extractors:
+      - type: regex
+        part: body
+        regex:
+          - "<title>(.*)</title>"
+        group: 1

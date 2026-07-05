@@ -1,0 +1,22 @@
+[package]
+name = "alive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Alive — modular internal security scanner (CLI)."
+
+[[bin]]
+name = "alive"
+path = "src/main.rs"
+
+[dependencies]
+alive-core = { workspace = true }
+alive-config = { workspace = true }
+alive-template = { workspace = true }
+alive-engine = { workspace = true }
+alive-protocols = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }

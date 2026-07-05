@@ -1,0 +1,14 @@
+[package]
+name = "alive-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Executes nuclei-compatible templates: matchers, extractors, and per-target orchestration."
+
+[dependencies]
+alive-core = { workspace = true }
+alive-template = { workspace = true }
+regex = { workspace = true }
+async-trait = { workspace = true }
