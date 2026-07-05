@@ -1,0 +1,12 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# Old Go build artifacts (superseded by the Rust rewrite)
+/alive
+/Alive_release/
+
+# Editor / OS
+.DS_Store
+.idea/

@@ -1,0 +1,16 @@
+[package]
+name = "alive-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Shared core types for the Alive scanner: targets, findings, severity, protocols, and errors."
+
+[lib]
+name = "alive_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
