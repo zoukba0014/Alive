@@ -6,17 +6,41 @@ Purpose: curated handoff state for agents and developers. This is not a raw tran
 
 - Branch: `feature/rust-rewrite`
 - Goal: Rust rewrite of Alive per `ROADMAP.md`, milestone by milestone.
-- Current status: **M7 (decentralized resilience) complete.** `alive-mesh` (custom SWIM-style detector + lowest-live-id leader election) + `alive-buffer` (redb FIFO) + agent offline re-run/buffer/flush-on-reconnect. Resilience + offline safety tests green.
-- Next action: **Start M8 — hardening & performance** (template clustering / request dedup; bloom-filter target dedup; rate limiting/backpressure; audit hardening; benchmarks). Final milestone → usable version. See `ROADMAP.md`.
+- Current status: **M8 (hardening & performance) complete — ALL MILESTONES DONE.** Template clustering, bloom/exact target dedup, governor rate limiting, tamper-evident audit hash-chain, criterion benches. System is a usable version.
+- Next action: finalization only (top-level README/usage doc, release build). Optional follow-ups are the deferred items below. No further milestones.
 - Blockers: none.
-- Relevant files: `crates/{mesh,buffer}/src/*`, `bin/alive-agent/src/run.rs`.
+- Relevant files: `crates/engine/src/cluster.rs`, `crates/discovery/src/dedup.rs`, `crates/protocols/src/rate.rs`, `bin/alive-server/src/audit.rs`, `benches/`.
 - Relevant docs: `ROADMAP.md` (plan), `map.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
 - Last test command: `cargo test -q && cargo clippy --workspace`
-- Last test result: 85 tests passed; clippy 0 issues; fmt clean.
-- Docs sync: mesh/buffer maps/specs scaffolded; root map refreshed.
-- Deferred (still open): DNS runner + payload modes (M3); SSH brute (M5); interactsh crypto (M5); csv/html triage annotations (M4); M6 simplifications (full-keypair enroll, interval scheduler, plaintext-localhost e2e); M7: full peer→leader result forwarding deferred (per-agent flush shipped; leader designated via `is_leader()`); memberlist crate not used (custom SWIM behind a drop-in seam).
+- Last test result: 95 tests passed; clippy 0 issues; fmt clean; `cargo bench --no-run` compiles.
+- Docs sync: engine/discovery/protocols/server updated in place; root map current.
+- Deferred (follow-ups, all non-blocking): DNS runner + payload modes (M3); SSH brute (M5); interactsh crypto (M5); csv/html triage annotations (M4); M6 simplifications (full-keypair enroll, interval scheduler, plaintext-localhost e2e); M7 full peer→leader result forwarding (per-agent flush shipped); M8 clustering primitive shipped+tested but `bin/alive` scan loop not yet rewired to use `run_http_cluster` (drop-in ready).
 
 ## Recent Sessions
+
+### 2026-07-06 — M8 Hardening & performance (final milestone)
+
+#### Summary
+- Perf + safety hardening; completes the roadmap.
+
+#### Changed
+- `alive-engine`: `cluster_templates` + `run_http_cluster` (byte-identical HTTP requests sent once,
+  matched per-template); `evaluate_http` made pub for benching.
+- `alive-discovery`: `dedup(items, DedupMode)` — Exact (HashSet, lossless default) / Bloom
+  (growable-bloom-filter, opt-in, skip-only FP, counted); wired into expansion with skip logging.
+- `alive-protocols`: `rate` module (governor); `HttpRunner::with_rate`; config `scan.rate_per_sec` + `--rate`.
+- `alive-server`: audit JSONL hash-chain (`prev` = sha256 of prior entry); `verify_audit_chain` + `--verify-audit`.
+- Benches: `alive-engine/benches/matcher.rs`, `alive-discovery/benches/dedup.rs` (criterion, harness=false).
+
+#### Decisions
+- Bloom is opt-in and documented FP-lossy (skips only); Exact is the default for correctness.
+- Rate-limit test uses governor `FakeRelativeClock` (deterministic, non-flaky).
+
+#### Failed Attempts
+- None.
+
+#### Next Steps
+- Finalization (README + release build). Deferred follow-ups listed in Current Handoff.
 
 ### 2026-07-06 — M7 Decentralized resilience
 

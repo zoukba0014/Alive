@@ -39,11 +39,35 @@ struct Cli {
     /// Ports for scheduled discover tasks.
     #[arg(long, default_value = "80,443,22")]
     schedule_ports: String,
+    /// Verify the audit log's hash chain and exit (uses --audit path).
+    #[arg(long)]
+    verify_audit: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+
+    if cli.verify_audit {
+        match alive_server::verify_audit_chain(&cli.audit) {
+            Ok(true) => {
+                println!("audit chain OK: {}", cli.audit.display());
+                return Ok(());
+            }
+            Ok(false) => {
+                eprintln!(
+                    "audit chain BROKEN (tampered/reordered): {}",
+                    cli.audit.display()
+                );
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("audit verify error: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
+
     let addr = cli.listen.parse()?;
     let service = FleetService::new(cli.audit.clone(), cli.reports.clone())
         .map_err(|e| format!("service init: {e}"))?;

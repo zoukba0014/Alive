@@ -5,6 +5,7 @@ scan:
   concurrency: 100        # max in-flight requests
   timeout_secs: 10        # per-request timeout
   follow_redirects: true
+  rate_per_sec: 0         # outbound HTTP req/s cap (0 = unlimited); bounds large scans
 
 # AI triage layer. Sits on top of the deterministic engine: it judges whether
 # each finding is a true positive, never sends packets itself.

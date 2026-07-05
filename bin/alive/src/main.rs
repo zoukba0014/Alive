@@ -23,7 +23,7 @@ use alive_brute::{
 };
 use alive_config::{Config, ProviderChoice};
 use alive_core::{Finding, Target};
-use alive_discovery::{detect, expand, parse_ports, scan_ports, Service};
+use alive_discovery::{dedup, detect, expand, parse_ports, scan_ports, DedupMode, Service};
 use alive_engine::{run_http_template, run_tcp_template, run_tls_template};
 use alive_fingerprint::tags_for;
 use alive_protocols::{HttpRunner, TcpRunner, TlsRunner};
@@ -70,6 +70,9 @@ struct ScanArgs {
     /// Force-enable AI triage of findings for this run (overrides config).
     #[arg(long)]
     ai: bool,
+    /// Outbound HTTP requests/second cap (0 = unlimited; overrides config).
+    #[arg(long)]
+    rate: Option<u32>,
     /// Output format.
     #[arg(long, default_value = "text")]
     output: OutputFormat,
@@ -339,13 +342,15 @@ async fn discover_assets(
 
 async fn discover(args: DiscoverArgs) -> Result<(), String> {
     let ports = parse_ports(&args.ports).map_err(|e| format!("ports: {e}"))?;
-    let mut ips: Vec<IpAddr> = args
+    let raw_ips: Vec<IpAddr> = args
         .target
         .iter()
         .flat_map(|t| resolve_targets(t))
         .collect();
-    ips.sort_unstable();
-    ips.dedup();
+    let (ips, skipped) = dedup(raw_ips, DedupMode::Exact);
+    if skipped > 0 {
+        eprintln!("deduped {skipped} duplicate target(s)");
+    }
     if ips.is_empty() {
         return Err("no resolvable targets".into());
     }
@@ -387,8 +392,12 @@ async fn scan(args: ScanArgs) -> Result<(), String> {
     }
 
     let timeout = Duration::from_secs(config.scan.timeout_secs);
+    let rate = args.rate.unwrap_or(config.scan.rate_per_sec);
+    if rate > 0 {
+        eprintln!("rate limiting outbound HTTP to {rate} req/s");
+    }
     let http_runner = Arc::new(
-        HttpRunner::new(timeout, config.scan.follow_redirects)
+        HttpRunner::with_rate(timeout, config.scan.follow_redirects, rate)
             .map_err(|e| format!("http runner: {e}"))?,
     );
     let tcp_runner = Arc::new(TcpRunner::new(timeout));
@@ -614,13 +623,15 @@ async fn build_jobs(args: &ScanArgs, config: &Config) -> Result<Vec<Job>, String
     let mut jobs = Vec::new();
     if let Some(portspec) = &args.ports {
         let ports = parse_ports(portspec).map_err(|e| format!("ports: {e}"))?;
-        let mut ips: Vec<IpAddr> = args
+        let raw_ips: Vec<IpAddr> = args
             .target
             .iter()
             .flat_map(|t| resolve_targets(t))
             .collect();
-        ips.sort_unstable();
-        ips.dedup();
+        let (ips, skipped) = dedup(raw_ips, DedupMode::Exact);
+        if skipped > 0 {
+            eprintln!("deduped {skipped} duplicate target(s)");
+        }
         let assets = discover_assets(
             &ips,
             &ports,

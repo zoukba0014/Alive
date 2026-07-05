@@ -9,12 +9,14 @@
 //! Nothing here is transport-agnostic like `engine`; these are the concrete
 //! network probes that feed the fingerprint → tag-routing step.
 
+mod dedup;
 mod expand;
 mod ping;
 mod ports;
 mod portscan;
 mod service;
 
+pub use dedup::{dedup, DedupMode};
 pub use expand::{expand, ExpandError};
 pub use ping::{ping_hosts, PingError};
 pub use ports::{parse_ports, PortParseError};

@@ -14,3 +14,11 @@ ipnet = { workspace = true }
 surge-ping = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+growable-bloom-filter = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "dedup"
+harness = false

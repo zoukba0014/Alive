@@ -102,8 +102,9 @@ pub(crate) fn evaluate(
     Some((evidence, extracted))
 }
 
-/// HTTP convenience wrapper used by `run_http_template`.
-pub(crate) fn evaluate_http(
+/// HTTP convenience wrapper used by `run_http_template` and the clustering path.
+/// Public so benchmarks can exercise the hot matcher path directly.
+pub fn evaluate_http(
     req: &HttpRequest,
     resp: &HttpResponse,
 ) -> Option<(Vec<Evidence>, Vec<String>)> {

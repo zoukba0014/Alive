@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use alive_core::{Error, Result};
@@ -7,6 +8,8 @@ use async_trait::async_trait;
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method};
 
+use crate::rate::{build_limiter, DirectLimiter};
+
 /// reqwest-backed HTTP runner.
 ///
 /// Accepts invalid/self-signed certificates by default: scanning internal
@@ -14,10 +17,18 @@ use reqwest::{Client, Method};
 /// the same. This is a scanner, not a browser.
 pub struct HttpRunner {
     client: Client,
+    /// Optional global rate limiter awaited before each request.
+    limiter: Option<Arc<DirectLimiter>>,
 }
 
 impl HttpRunner {
     pub fn new(timeout: Duration, follow_redirects: bool) -> Result<Self> {
+        Self::with_rate(timeout, follow_redirects, 0)
+    }
+
+    /// Build a runner capped at `rate_per_sec` outbound requests/second
+    /// (0 = unlimited).
+    pub fn with_rate(timeout: Duration, follow_redirects: bool, rate_per_sec: u32) -> Result<Self> {
         let redirect = if follow_redirects {
             Policy::limited(5)
         } else {
@@ -30,7 +41,10 @@ impl HttpRunner {
             .user_agent("alive-scanner/0.1")
             .build()
             .map_err(|e| Error::Other(format!("http client build failed: {e}")))?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            limiter: build_limiter(rate_per_sec),
+        })
     }
 }
 
@@ -43,6 +57,10 @@ impl HttpClient for HttpRunner {
         headers: &BTreeMap<String, String>,
         body: Option<&str>,
     ) -> Result<HttpResponse> {
+        // Await a rate-limit token before firing (no-op when unlimited).
+        if let Some(limiter) = &self.limiter {
+            limiter.until_ready().await;
+        }
         let method = Method::from_bytes(method.as_bytes())
             .map_err(|_| Error::Other(format!("invalid http method: {method}")))?;
         let mut builder = self.client.request(method, url);

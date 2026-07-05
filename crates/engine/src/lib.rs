@@ -7,12 +7,15 @@
 //! requests, evaluates matchers (including `dsl:`), runs extractors, and emits
 //! a [`Finding`] on a match.
 
+mod cluster;
 mod http;
 mod matcher;
 mod tcp;
 mod tls;
 
+pub use cluster::{cluster_templates, run_http_cluster, Cluster};
 pub use http::{HttpClient, HttpResponse};
+pub use matcher::evaluate_http;
 pub use tcp::{TcpClient, TcpResponse};
 pub use tls::{TlsCertInfo, TlsClient};
 
@@ -21,7 +24,7 @@ use alive_template::Template;
 
 use matcher::MatchInput;
 
-fn build_finding(template: &Template, target: &Target) -> Finding {
+pub(crate) fn build_finding(template: &Template, target: &Target) -> Finding {
     Finding::new(
         template.id.clone(),
         template.info.name.clone(),

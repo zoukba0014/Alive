@@ -127,6 +127,8 @@ pub struct ScanConfig {
     pub timeout_secs: u64,
     /// Whether HTTP runners follow redirects.
     pub follow_redirects: bool,
+    /// Outbound HTTP requests/second cap (0 = unlimited). Bounds large scans.
+    pub rate_per_sec: u32,
 }
 
 impl Default for ScanConfig {
@@ -135,6 +137,7 @@ impl Default for ScanConfig {
             concurrency: 100,
             timeout_secs: 10,
             follow_redirects: true,
+            rate_per_sec: 0,
         }
     }
 }

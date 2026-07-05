@@ -19,7 +19,7 @@ use tokio_stream::Stream;
 use tonic::{Request, Response, Status, Streaming};
 
 mod audit;
-pub use audit::AuditLog;
+pub use audit::{verify_audit_chain, AuditLog};
 
 /// PEM triple `(server_cert, server_key, ca_cert)` for building mTLS config.
 pub type ServerIdentityPems = (Vec<u8>, Vec<u8>, Vec<u8>);

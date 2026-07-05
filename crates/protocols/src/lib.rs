@@ -3,9 +3,11 @@
 //! arrives in a later milestone.
 
 mod http;
+mod rate;
 mod tcp;
 mod tls;
 
 pub use http::HttpRunner;
+pub use rate::{build_limiter, DirectLimiter};
 pub use tcp::TcpRunner;
 pub use tls::TlsRunner;

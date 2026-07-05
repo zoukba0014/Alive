@@ -73,6 +73,10 @@ rcgen = "0.13"
 rand = "0.8"
 # Fleet resilience (M7): offline buffer
 redb = "2"
+# Hardening / performance (M8)
+governor = "0.6"
+growable-bloom-filter = "2"
+criterion = "0.5"
 # Internal crates
 alive-core = { path = "crates/core" }
 alive-mesh = { path = "crates/mesh" }

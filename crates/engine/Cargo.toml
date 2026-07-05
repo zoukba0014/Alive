@@ -13,3 +13,11 @@ alive-template = { workspace = true }
 alive-dsl = { workspace = true }
 regex = { workspace = true }
 async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "matcher"
+harness = false
