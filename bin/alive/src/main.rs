@@ -13,7 +13,11 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use alive_config::Config;
+use alive_ai::{
+    ClaudeProvider, LlmProvider, LocalProvider, ProviderKind, ProviderRouter, RoutingPolicy,
+    TriageRequest, TriageVerdict,
+};
+use alive_config::{Config, ProviderChoice};
 use alive_core::{Finding, Target};
 use alive_discovery::{detect, expand, parse_ports, scan_ports, Service};
 use alive_engine::{run_http_template, run_tcp_template, run_tls_template};
@@ -56,6 +60,9 @@ struct ScanArgs {
     /// Optional global config YAML.
     #[arg(long)]
     config: Option<PathBuf>,
+    /// Force-enable AI triage of findings for this run (overrides config).
+    #[arg(long)]
+    ai: bool,
     /// Output format.
     #[arg(long, default_value = "text")]
     output: OutputFormat,
@@ -335,8 +342,176 @@ async fn scan(args: ScanArgs) -> Result<(), String> {
         }
     }
 
-    emit(&findings, args.output);
+    if (config.ai.enabled || args.ai) && !findings.is_empty() {
+        let triaged = run_triage(findings, &config).await;
+        emit_triaged(&triaged, args.output);
+    } else {
+        emit(&findings, args.output);
+    }
     Ok(())
+}
+
+/// A finding with its optional AI triage verdict attached.
+#[derive(Serialize)]
+struct TriagedFinding {
+    #[serde(flatten)]
+    finding: Finding,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    triage: Option<TriageVerdict>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
+}
+
+impl TriagedFinding {
+    fn untriaged(finding: Finding) -> Self {
+        Self {
+            finding,
+            triage: None,
+            provider: None,
+        }
+    }
+}
+
+fn to_kind(c: ProviderChoice) -> ProviderKind {
+    match c {
+        ProviderChoice::Local => ProviderKind::Local,
+        ProviderChoice::Cloud => ProviderKind::Cloud,
+    }
+}
+
+/// Build the provider router from config. Cloud is only wired when
+/// `ANTHROPIC_API_KEY` is present; otherwise the router falls back to local.
+fn build_router(config: &Config) -> Result<ProviderRouter, String> {
+    let ai = &config.ai;
+    let local = Arc::new(
+        LocalProvider::new(
+            ai.providers.local.base_url.as_str(),
+            ai.providers.local.model.as_str(),
+        )
+        .map_err(|e| e.to_string())?,
+    ) as Arc<dyn LlmProvider>;
+    let cloud: Option<Arc<dyn LlmProvider>> = if ClaudeProvider::available() {
+        Some(Arc::new(
+            ClaudeProvider::new(ai.providers.claude.model.as_str()).map_err(|e| e.to_string())?,
+        ) as Arc<dyn LlmProvider>)
+    } else {
+        None
+    };
+    let policy = RoutingPolicy {
+        default_provider: to_kind(ai.default_provider),
+        sensitive_data: to_kind(ai.routing.sensitive_data),
+        redact_before_cloud: ai.routing.redact_before_cloud,
+    };
+    Ok(ProviderRouter::new(local, cloud, policy))
+}
+
+/// Build a triage request from a finding, using its evidence as the response
+/// excerpt (the engine doesn't retain the raw request/response verbatim).
+fn triage_request(f: &Finding) -> TriageRequest {
+    let response_excerpt = f
+        .evidence
+        .iter()
+        .map(|e| format!("[{}] {}", e.part, e.snippet))
+        .collect::<Vec<_>>()
+        .join("\n");
+    TriageRequest {
+        finding: f.clone(),
+        request: format!("template `{}` against {}", f.template_id, f.target),
+        response_excerpt,
+        template_name: f.name.clone(),
+        template_tags: Vec::new(),
+    }
+}
+
+/// Triage findings at/above the configured severity, preserving input order.
+/// Findings below the threshold pass through untriaged.
+async fn run_triage(findings: Vec<Finding>, config: &Config) -> Vec<TriagedFinding> {
+    let router = match build_router(config) {
+        Ok(r) => Arc::new(r),
+        Err(e) => {
+            eprintln!("warn: AI triage disabled ({e}); reporting raw findings");
+            return findings
+                .into_iter()
+                .map(TriagedFinding::untriaged)
+                .collect();
+        }
+    };
+
+    let min = config.ai.min_severity;
+    let sem = Arc::new(Semaphore::new(config.scan.concurrency.clamp(1, 8)));
+    let mut slots: Vec<Option<TriagedFinding>> = (0..findings.len()).map(|_| None).collect();
+    let mut set = tokio::task::JoinSet::new();
+
+    for (idx, finding) in findings.into_iter().enumerate() {
+        if finding.severity < min {
+            slots[idx] = Some(TriagedFinding::untriaged(finding));
+            continue;
+        }
+        let router = router.clone();
+        let sem = sem.clone();
+        set.spawn(async move {
+            let _permit = sem.acquire().await.ok();
+            let req = triage_request(&finding);
+            match router.triage(&req).await {
+                Ok((verdict, provider)) => (
+                    idx,
+                    TriagedFinding {
+                        finding,
+                        triage: Some(verdict),
+                        provider: Some(provider),
+                    },
+                ),
+                Err(e) => {
+                    eprintln!("warn: triage failed for {}: {e}", finding.template_id);
+                    (idx, TriagedFinding::untriaged(finding))
+                }
+            }
+        });
+    }
+
+    while let Some(joined) = set.join_next().await {
+        if let Ok((idx, tf)) = joined {
+            slots[idx] = Some(tf);
+        }
+    }
+    slots.into_iter().flatten().collect()
+}
+
+fn emit_triaged(items: &[TriagedFinding], format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(items).unwrap_or_default()
+            );
+        }
+        OutputFormat::Text => {
+            if items.is_empty() {
+                eprintln!("no findings");
+            }
+            for it in items {
+                let f = &it.finding;
+                match &it.triage {
+                    Some(v) => {
+                        let tag = if v.is_true_positive { "TP" } else { "FP?" };
+                        println!(
+                            "[{}] [{tag} {:.0}%] {} — {} ({}) via {}",
+                            f.severity,
+                            v.confidence * 100.0,
+                            f.template_id,
+                            f.target,
+                            f.name,
+                            it.provider.as_deref().unwrap_or("?"),
+                        );
+                    }
+                    None => println!(
+                        "[{}] {} — {} ({})",
+                        f.severity, f.template_id, f.target, f.name
+                    ),
+                }
+            }
+        }
+    }
 }
 
 /// Build scan jobs. With `--ports`, discover + fingerprint first and route by

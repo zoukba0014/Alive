@@ -1,0 +1,19 @@
+[package]
+name = "alive-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "LLM-backed triage of scanner findings with a switchable local/cloud provider router."
+
+[dependencies]
+alive-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+regex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

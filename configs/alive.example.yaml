@@ -1,0 +1,35 @@
+# Alive scanner configuration (example). Pass with `alive scan --config <path>`.
+# Every section is optional; omitted keys fall back to built-in defaults.
+
+scan:
+  concurrency: 100        # max in-flight requests
+  timeout_secs: 10        # per-request timeout
+  follow_redirects: true
+
+# AI triage layer. Sits on top of the deterministic engine: it judges whether
+# each finding is a true positive, never sends packets itself.
+ai:
+  enabled: false          # off by default; `alive scan --ai` force-enables per run
+  min_severity: medium    # only triage findings at/above this (info|low|medium|high|critical)
+
+  # Which tier to use when nothing forces a choice. `local` keeps data on-prem.
+  default_provider: local # local | cloud
+
+  providers:
+    local:
+      # Any OpenAI-compatible endpoint (Ollama, vLLM). Data never leaves the network.
+      base_url: http://localhost:11434/v1
+      model: qwen2.5:14b
+    claude:
+      # Cloud model. Requires ANTHROPIC_API_KEY in the environment.
+      # Tiers: claude-haiku-4-5 (cheap, high-volume triage),
+      #        claude-sonnet-4-6 (balanced),
+      #        claude-opus-4-8 (default, hardest judgements).
+      model: claude-opus-4-8
+
+  routing:
+    # Findings that reference internal IPs/hostnames are pinned here.
+    # This is a security boundary, not a preference — keep it `local`.
+    sensitive_data: local   # local | cloud
+    # Mask internal IPs/hostnames before anything is sent to the cloud.
+    redact_before_cloud: true

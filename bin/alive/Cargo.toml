@@ -19,6 +19,7 @@ alive-engine = { workspace = true }
 alive-protocols = { workspace = true }
 alive-discovery = { workspace = true }
 alive-fingerprint = { workspace = true }
+alive-ai = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

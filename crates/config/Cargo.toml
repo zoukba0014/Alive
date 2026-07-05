@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Global YAML configuration for the Alive scanner."
 
 [dependencies]
+alive-core = { workspace = true }
 serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
 thiserror = { workspace = true }

@@ -6,17 +6,45 @@ Purpose: curated handoff state for agents and developers. This is not a raw tran
 
 - Branch: `feature/rust-rewrite`
 - Goal: Rust rewrite of Alive per `ROADMAP.md`, milestone by milestone.
-- Current status: **M3 (multi-protocol + DSL) complete.** http/tcp/tls runners + nuclei DSL engine; `scan` dispatches per protocol block.
-- Next action: **Start M4 — AI analysis layer (triage)** (`ai` crate: `LlmProvider` trait, local + Claude providers, sensitive→local router + redaction, `triage()` with enforced JSON schema; wire into report). See `ROADMAP.md`.
+- Current status: **M4 (AI triage layer) complete.** `alive-ai` provider-switchable triage (local + Claude), sensitive→local routing + redaction, wired into `scan --ai`.
+- Next action: **Start M5 — brute + report + OOB** (`brute`: SSH/MySQL/Redis/... allowlisted creds; `report`: json/csv/html; `oob`: interactsh). See `ROADMAP.md`.
 - Blockers: none.
-- Relevant files: `crates/{dsl,template,engine,protocols}/src/*`, `bin/alive/src/main.rs`, `pocs/redis-unauth-tcp.yaml`.
+- Relevant files: `crates/ai/src/*`, `crates/config/src/lib.rs`, `bin/alive/src/main.rs`, `configs/alive.example.yaml`.
 - Relevant docs: `ROADMAP.md` (plan), `map.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
 - Last test command: `cargo test -q && cargo clippy --workspace`
-- Last test result: 40 tests passed; clippy 0 issues; fmt clean.
-- Docs sync: dsl crate maps/specs scaffolded; root map refreshed.
-- Deferred: DNS runner (parses, no runner yet) and HTTP payload attack modes — pick up in a later step.
+- Last test result: 52 tests passed; clippy 0 issues; fmt clean.
+- Docs sync: ai crate maps/specs scaffolded; root map refreshed.
+- Deferred (still open): DNS runner + HTTP payload attack modes (from M3). Live LLM triage not exercised in tests (needs network/keys) — plumbing covered by FakeProvider.
 
 ## Recent Sessions
+
+### 2026-07-06 — M4 AI triage layer
+
+#### Summary
+- Added a provider-switchable LLM triage layer on top of the deterministic engine.
+
+#### Changed
+- `alive-ai` (new): `LlmProvider` trait, `TriageRequest`/`TriageVerdict`; `ClaudeProvider`
+  (reqwest → `/v1/messages`, structured output forced via a `record_triage` tool + tool_choice;
+  no sampling params; key from `ANTHROPIC_API_KEY`); `LocalProvider` (OpenAI-compatible
+  `/chat/completions`, `response_format: json_object`); `ProviderRouter` (sensitive→local security
+  boundary, redact-before-cloud); `redact.rs` (RFC1918/loopback IPs + `.internal`/`.local` hosts).
+- `alive-config`: `ai` section (disabled by default, `min_severity=medium`, provider/routing
+  sub-structs), all `#[serde(default)]`; added `alive-core` dep for `Severity`; local `ProviderChoice`.
+- `bin/alive`: `scan --ai` triages findings ≥ min_severity (bounded concurrency); false positives
+  annotated `[FP?]`, never dropped; JSON adds `triage`/`provider`.
+- `configs/alive.example.yaml`: sample config with commented model-tier options.
+
+#### Decisions
+- Structured output guaranteed via forced `record_triage` tool (not free-form JSON) → schema-valid.
+- Default cloud model `claude-opus-4-8` (per API guidance); tiers documented for the user to pick.
+- Enabled reqwest `json` feature on the workspace dep (additive).
+
+#### Failed Attempts
+- None.
+
+#### Next Steps
+- M5: `brute` + `report` (html) + `oob` (interactsh).
 
 ### 2026-07-06 — M3 Multi-protocol + DSL
 

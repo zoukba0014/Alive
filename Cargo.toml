@@ -9,6 +9,7 @@ members = [
     "crates/protocols",
     "crates/discovery",
     "crates/fingerprint",
+    "crates/ai",
     "bin/alive",
 ]
 
@@ -31,7 +32,7 @@ tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 # Matching / IO
 regex = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json"] }
 walkdir = "2"
 clap = { version = "4", features = ["derive"] }
 # Network discovery / fingerprinting
@@ -60,6 +61,7 @@ alive-engine = { path = "crates/engine" }
 alive-protocols = { path = "crates/protocols" }
 alive-discovery = { path = "crates/discovery" }
 alive-fingerprint = { path = "crates/fingerprint" }
+alive-ai = { path = "crates/ai" }
 
 [profile.release]
 strip = true

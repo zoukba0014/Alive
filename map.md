@@ -18,6 +18,7 @@ Navigation layer for this repository. Read this first, then route to the smalles
 | Component | Path | Purpose | Docs |
 |---|---|---|---|
 | `alive` | `bin/alive` | TODO | `bin/alive/map.md` |
+| `alive-ai` | `crates/ai` | TODO | `crates/ai/map.md` |
 | `alive-config` | `crates/config` | TODO | `crates/config/map.md` |
 | `alive-core` | `crates/core` | TODO | `crates/core/map.md` |
 | `alive-discovery` | `crates/discovery` | TODO | `crates/discovery/map.md` |

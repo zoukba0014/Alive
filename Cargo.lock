@@ -21,6 +21,7 @@ dependencies = [
 name = "alive"
 version = "0.1.0"
 dependencies = [
+ "alive-ai",
  "alive-config",
  "alive-core",
  "alive-discovery",
@@ -35,9 +36,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "alive-ai"
+version = "0.1.0"
+dependencies = [
+ "alive-core",
+ "async-trait",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "alive-config"
 version = "0.1.0"
 dependencies = [
+ "alive-core",
  "serde",
  "serde_yaml_ng",
  "thiserror 2.0.18",
