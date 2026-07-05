@@ -27,6 +27,20 @@ struct Cli {
     /// Expected server certificate domain (SAN) for mTLS.
     #[arg(long, default_value = "localhost")]
     tls_domain: String,
+    /// Persistent offline buffer path. Set to survive server outages: results
+    /// are buffered while offline and flushed on reconnect.
+    #[arg(long)]
+    buffer_path: Option<PathBuf>,
+    /// Mesh bind address (ip:port) to join the decentralized peer mesh
+    /// (failure detection + leader election). Bind a routable address.
+    #[arg(long)]
+    mesh_bind: Option<String>,
+    /// Seed peer mesh addresses (repeatable / comma-separated).
+    #[arg(long, value_delimiter = ',')]
+    mesh_seed: Vec<String>,
+    /// Reconnect backoff ceiling in seconds (also the offline re-execution cadence).
+    #[arg(long, default_value_t = 30)]
+    max_backoff_secs: u64,
 }
 
 #[tokio::main]
@@ -43,6 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         insecure: cli.insecure,
         ca_pem,
         tls_domain: cli.tls_domain,
+        buffer_path: cli.buffer_path,
+        mesh_bind: cli.mesh_bind,
+        mesh_seeds: cli.mesh_seed,
+        max_backoff_secs: cli.max_backoff_secs,
     })
     .await
 }

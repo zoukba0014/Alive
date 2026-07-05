@@ -1,0 +1,18 @@
+[package]
+name = "alive-buffer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Persistent offline result buffer (redb) — agents store findings when the control plane is unreachable and flush on reconnect."
+
+[lib]
+name = "alive_buffer"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+redb = { workspace = true }
+thiserror = { workspace = true }

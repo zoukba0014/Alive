@@ -1,0 +1,18 @@
+[package]
+name = "alive-mesh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Decentralized peer membership (SWIM-style failure detection) + deterministic leader election for the agent fleet."
+
+[lib]
+name = "alive_mesh"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }

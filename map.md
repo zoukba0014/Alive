@@ -22,12 +22,14 @@ Navigation layer for this repository. Read this first, then route to the smalles
 | `alive` | `bin/alive` | TODO | `bin/alive/map.md` |
 | `alive-ai` | `crates/ai` | TODO | `crates/ai/map.md` |
 | `alive-brute` | `crates/brute` | TODO | `crates/brute/map.md` |
+| `alive-buffer` | `crates/buffer` | TODO | `crates/buffer/map.md` |
 | `alive-config` | `crates/config` | TODO | `crates/config/map.md` |
 | `alive-core` | `crates/core` | TODO | `crates/core/map.md` |
 | `alive-discovery` | `crates/discovery` | TODO | `crates/discovery/map.md` |
 | `alive-dsl` | `crates/dsl` | TODO | `crates/dsl/map.md` |
 | `alive-engine` | `crates/engine` | TODO | `crates/engine/map.md` |
 | `alive-fingerprint` | `crates/fingerprint` | TODO | `crates/fingerprint/map.md` |
+| `alive-mesh` | `crates/mesh` | TODO | `crates/mesh/map.md` |
 | `alive-oob` | `crates/oob` | TODO | `crates/oob/map.md` |
 | `alive-proto` | `crates/proto` | TODO | `crates/proto/map.md` |
 | `alive-protocols` | `crates/protocols` | TODO | `crates/protocols/map.md` |

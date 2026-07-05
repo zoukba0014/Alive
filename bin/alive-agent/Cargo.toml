@@ -24,6 +24,8 @@ alive-template = { workspace = true }
 alive-engine = { workspace = true }
 alive-protocols = { workspace = true }
 alive-discovery = { workspace = true }
+alive-mesh = { workspace = true }
+alive-buffer = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true }

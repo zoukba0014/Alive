@@ -6,17 +6,42 @@ Purpose: curated handoff state for agents and developers. This is not a raw tran
 
 - Branch: `feature/rust-rewrite`
 - Goal: Rust rewrite of Alive per `ROADMAP.md`, milestone by milestone.
-- Current status: **M6 (fleet foundation) complete.** gRPC bidi-stream server+agent, mTLS, CA enrollment, ed25519-signed tasks, fixed TaskType catalog, audit log. Security tests green (bad-sig + out-of-scope refusal, e2e dispatch→verify→execute→audit).
-- Next action: **Start M7 — decentralized resilience** (`mesh`: memberlist SWIM + peer failure detection + **leader election**; offline persistent buffer (redb/sled) with flush-on-reconnect; leader aggregates/relays reports when the server is unreachable). Locked decision: fully decentralized, peer elects a leader. Clean seam left in `alive-agent::run`. See `ROADMAP.md`.
+- Current status: **M7 (decentralized resilience) complete.** `alive-mesh` (custom SWIM-style detector + lowest-live-id leader election) + `alive-buffer` (redb FIFO) + agent offline re-run/buffer/flush-on-reconnect. Resilience + offline safety tests green.
+- Next action: **Start M8 — hardening & performance** (template clustering / request dedup; bloom-filter target dedup; rate limiting/backpressure; audit hardening; benchmarks). Final milestone → usable version. See `ROADMAP.md`.
 - Blockers: none.
-- Relevant files: `crates/{proto,transport}/src/*`, `bin/alive-server/src/*`, `bin/alive-agent/src/*`.
+- Relevant files: `crates/{mesh,buffer}/src/*`, `bin/alive-agent/src/run.rs`.
 - Relevant docs: `ROADMAP.md` (plan), `map.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
 - Last test command: `cargo test -q && cargo clippy --workspace`
-- Last test result: 76 tests passed; clippy 0 issues; fmt clean.
-- Docs sync: proto/transport/server/agent maps/specs scaffolded; root map refreshed.
-- Deferred (still open): DNS runner + payload modes (M3); SSH brute (M5); interactsh crypto (M5); csv/html triage annotations (M4); M6 simplifications: enrollment issues full keypair (no CSR parse), interval scheduler (no cron expr), e2e test uses plaintext localhost (mTLS covered by transport unit tests + real bins).
+- Last test result: 85 tests passed; clippy 0 issues; fmt clean.
+- Docs sync: mesh/buffer maps/specs scaffolded; root map refreshed.
+- Deferred (still open): DNS runner + payload modes (M3); SSH brute (M5); interactsh crypto (M5); csv/html triage annotations (M4); M6 simplifications (full-keypair enroll, interval scheduler, plaintext-localhost e2e); M7: full peer→leader result forwarding deferred (per-agent flush shipped; leader designated via `is_leader()`); memberlist crate not used (custom SWIM behind a drop-in seam).
 
 ## Recent Sessions
+
+### 2026-07-06 — M7 Decentralized resilience
+
+#### Summary
+- Agents survive server outages: gossip health, keep running cached tasks, buffer + flush on recovery.
+
+#### Changed
+- `alive-mesh` (new): custom SWIM-style failure detector (time-injected `MembershipState` +
+  `GossipMembership` UDP wrapper); **leader = lowest live NodeId**, re-elects on membership change.
+- `alive-buffer` (new): redb-backed durable FIFO (`enqueue`/`drain`/`len`), survives restart.
+- `bin/alive-agent`: reconnect w/ capped backoff; flush-on-reconnect; offline path re-runs cached
+  signed tasks (stored as prost bytes, sig+scope preserved) and buffers results; mesh join via `--mesh-bind`.
+  New flags: `--buffer-path`, `--mesh-bind`, `--mesh-seed`, `--max-backoff-secs`.
+
+#### Decisions
+- Custom SWIM (not `memberlist`) to keep the workspace green + fully unit-testable; drop-in seam kept.
+- Offline safety preserved: cached tasks re-verified (sig + scope) before every re-run (tested);
+  flushed results reach the server as normal `Result`s (audit-logged).
+- Full peer→leader result forwarding deferred; per-agent flush shipped, leader designated for relay.
+
+#### Failed Attempts
+- None.
+
+#### Next Steps
+- M8: template clustering/dedup, bloom target dedup, rate limiting, benchmarks → usable version.
 
 ### 2026-07-06 — M6 Fleet foundation
 
