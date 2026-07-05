@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package alive.fleet.v1;
+
+// The fleet control-plane service.
+//
+// Enroll issues a per-agent identity. Connect is a long-lived bidirectional
+// stream: the agent holds it open, the server pushes Tasks down it, the agent
+// streams Results back up. The server never dials the agent.
+service Fleet {
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  rpc Stream(stream AgentMessage) returns (stream ServerMessage);
+}
+
+message EnrollRequest {
+  string agent_name = 1;
+}
+
+message EnrollResponse {
+  string agent_id = 1;
+  // PEM-encoded leaf cert + private key issued to the agent for mTLS, and the
+  // CA cert it should trust. (Simplified enrollment — see transport crate.)
+  bytes client_cert_pem = 2;
+  bytes client_key_pem = 3;
+  bytes ca_cert_pem = 4;
+  // ed25519 public key the agent uses to verify task signatures.
+  bytes server_verify_key = 5;
+}
+
+// ---- Server -> Agent -------------------------------------------------------
+
+message ServerMessage {
+  oneof kind {
+    Task task = 1;
+    Ack ack = 2;
+    Ping ping = 3;
+  }
+}
+
+message Ack { string task_id = 1; }
+message Ping { uint64 nonce = 1; }
+
+// ---- Agent -> Server -------------------------------------------------------
+
+message AgentMessage {
+  oneof kind {
+    Hello hello = 1;
+    TaskResult result = 2;
+    AgentStatus status = 3;
+    Pong pong = 4;
+  }
+}
+
+message Hello { string agent_id = 1; }
+message Pong { uint64 nonce = 1; }
+message AgentStatus {
+  string agent_id = 1;
+  string state = 2;
+}
+
+message TaskResult {
+  string task_id = 1;
+  // JSON-serialized Vec<alive_core::Finding>.
+  string findings_json = 2;
+  string status = 3;
+}
+
+// ---- Fixed task catalog (the safety boundary) ------------------------------
+//
+// A Task can only be one of the enumerated body types below. There is no
+// free-form command/shell field — the server cannot ask an agent to run
+// arbitrary code.
+
+message Task {
+  string task_id = 1;
+  // Authorized target scope (CIDRs / hosts). The agent refuses targets outside
+  // this set even if the server sends them.
+  repeated string authorized_scope = 2;
+  int64 issued_at = 3;         // unix seconds
+  bytes signature = 4;         // ed25519 over the canonical task bytes
+  oneof body {
+    ScanTask scan = 10;
+    DiscoverTask discover = 11;
+    CollectInventoryTask collect_inventory = 12;
+  }
+}
+
+message ScanTask {
+  repeated string targets = 1;
+  repeated string template_ids = 2;
+  string ports = 3;
+}
+
+message DiscoverTask {
+  repeated string targets = 1;
+  string ports = 2;
+}
+
+message CollectInventoryTask {}

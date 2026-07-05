@@ -13,7 +13,11 @@ members = [
     "crates/report",
     "crates/brute",
     "crates/oob",
+    "crates/proto",
+    "crates/transport",
     "bin/alive",
+    "bin/alive-server",
+    "bin/alive-agent",
 ]
 
 [workspace.package]
@@ -56,8 +60,19 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring"]
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rustls-pki-types = "1"
 x509-parser = "0.16"
+# Fleet: gRPC, mTLS, signing
+tonic = { version = "0.12", features = ["tls"] }
+prost = "0.13"
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+tokio-stream = "0.1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rcgen = "0.13"
+rand = "0.8"
 # Internal crates
 alive-core = { path = "crates/core" }
+alive-proto = { path = "crates/proto" }
+alive-transport = { path = "crates/transport" }
 alive-config = { path = "crates/config" }
 alive-template = { path = "crates/template" }
 alive-dsl = { path = "crates/dsl" }

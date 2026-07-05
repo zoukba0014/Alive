@@ -1,0 +1,16 @@
+[package]
+name = "alive-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "gRPC service definitions and the fixed fleet TaskType catalog (tonic/prost)."
+
+[dependencies]
+tonic = { workspace = true }
+prost = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+protoc-bin-vendored = { workspace = true }

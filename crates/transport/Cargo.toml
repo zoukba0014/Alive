@@ -1,0 +1,17 @@
+[package]
+name = "alive-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Fleet transport security: mTLS config, enrollment CA, and ed25519 task signing + scope enforcement."
+
+[dependencies]
+alive-proto = { workspace = true }
+tonic = { workspace = true }
+ed25519-dalek = { workspace = true }
+rcgen = { workspace = true, features = ["pem", "x509-parser"] }
+rand = { workspace = true }
+ipnet = { workspace = true }
+thiserror = { workspace = true }

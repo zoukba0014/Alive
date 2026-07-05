@@ -17,6 +17,8 @@ Navigation layer for this repository. Read this first, then route to the smalles
 
 | Component | Path | Purpose | Docs |
 |---|---|---|---|
+| `alive-agent` | `bin/alive-agent` | TODO | `bin/alive-agent/map.md` |
+| `alive-server` | `bin/alive-server` | TODO | `bin/alive-server/map.md` |
 | `alive` | `bin/alive` | TODO | `bin/alive/map.md` |
 | `alive-ai` | `crates/ai` | TODO | `crates/ai/map.md` |
 | `alive-brute` | `crates/brute` | TODO | `crates/brute/map.md` |
@@ -27,9 +29,11 @@ Navigation layer for this repository. Read this first, then route to the smalles
 | `alive-engine` | `crates/engine` | TODO | `crates/engine/map.md` |
 | `alive-fingerprint` | `crates/fingerprint` | TODO | `crates/fingerprint/map.md` |
 | `alive-oob` | `crates/oob` | TODO | `crates/oob/map.md` |
+| `alive-proto` | `crates/proto` | TODO | `crates/proto/map.md` |
 | `alive-protocols` | `crates/protocols` | TODO | `crates/protocols/map.md` |
 | `alive-report` | `crates/report` | TODO | `crates/report/map.md` |
 | `alive-template` | `crates/template` | TODO | `crates/template/map.md` |
+| `alive-transport` | `crates/transport` | TODO | `crates/transport/map.md` |
 
 ## Detail Layer
 

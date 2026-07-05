@@ -6,17 +6,44 @@ Purpose: curated handoff state for agents and developers. This is not a raw tran
 
 - Branch: `feature/rust-rewrite`
 - Goal: Rust rewrite of Alive per `ROADMAP.md`, milestone by milestone.
-- Current status: **M5 (brute + report + OOB) complete.** Standalone scanner is feature-complete (discovery → protocols → fingerprint → engine → AI triage → brute → reports).
-- Next action: **Start M6 — fleet foundation** (`proto`: gRPC + fixed TaskType catalog; `transport`: mTLS + enrollment + ed25519 task signing; `bin/alive-server`: scheduler/dispatch/ingest/audit; `bin/alive-agent`: enroll → long-lived bidi stream → execute → local buffer). See `ROADMAP.md`. Comms: long-lived gRPC bidi stream, server pushes.
+- Current status: **M6 (fleet foundation) complete.** gRPC bidi-stream server+agent, mTLS, CA enrollment, ed25519-signed tasks, fixed TaskType catalog, audit log. Security tests green (bad-sig + out-of-scope refusal, e2e dispatch→verify→execute→audit).
+- Next action: **Start M7 — decentralized resilience** (`mesh`: memberlist SWIM + peer failure detection + **leader election**; offline persistent buffer (redb/sled) with flush-on-reconnect; leader aggregates/relays reports when the server is unreachable). Locked decision: fully decentralized, peer elects a leader. Clean seam left in `alive-agent::run`. See `ROADMAP.md`.
 - Blockers: none.
-- Relevant files: `crates/{report,brute,oob}/src/*`, `bin/alive/src/main.rs`.
+- Relevant files: `crates/{proto,transport}/src/*`, `bin/alive-server/src/*`, `bin/alive-agent/src/*`.
 - Relevant docs: `ROADMAP.md` (plan), `map.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
 - Last test command: `cargo test -q && cargo clippy --workspace`
-- Last test result: 61 tests passed; clippy 0 issues; fmt clean.
-- Docs sync: report/brute/oob crate maps/specs scaffolded; root map refreshed.
-- Deferred (still open): DNS runner + HTTP payload attack modes (M3); SSH brute service (russh, C-dep avoidance); full interactsh RSA crypto (M5, HTTP-poll client shipped); triage annotations in csv/html reports (raw findings only there for now).
+- Last test result: 76 tests passed; clippy 0 issues; fmt clean.
+- Docs sync: proto/transport/server/agent maps/specs scaffolded; root map refreshed.
+- Deferred (still open): DNS runner + payload modes (M3); SSH brute (M5); interactsh crypto (M5); csv/html triage annotations (M4); M6 simplifications: enrollment issues full keypair (no CSR parse), interval scheduler (no cron expr), e2e test uses plaintext localhost (mTLS covered by transport unit tests + real bins).
 
 ## Recent Sessions
+
+### 2026-07-06 — M6 Fleet foundation
+
+#### Summary
+- Built the distributed control plane: server + agent over a long-lived gRPC bidi stream.
+
+#### Changed
+- `alive-proto` (new): tonic/prost gRPC (`Fleet { Enroll, Stream }`), vendored protoc via build.rs.
+  `Task.body` is a closed oneof `ScanTask|DiscoverTask|CollectInventoryTask` — the safety boundary;
+  no free-form command/shell field exists. Task carries task_id, authorized_scope, issued_at, ed25519 signature.
+- `alive-transport` (new): mTLS builders (rustls), `rcgen` CA + leaf issuance, ed25519 `sign`/`verify`
+  over canonical task bytes, `scope` CIDR/host allowlist check.
+- `alive-server` (new bin): gRPC service, agent registry, interval scheduler, result ingest (→alive-report),
+  append-only JSONL audit log.
+- `alive-agent` (new bin): enroll → mTLS stream → verify+scope-check+execute (reusing scanner engine) → stream results.
+
+#### Decisions
+- Server signs every task; agent refuses bad-sig or out-of-scope BEFORE executing (both tested).
+- Fixed TaskType catalog enforced at the schema level (no arbitrary shell — matches WORKSPACE_SPEC).
+- Simplifications (documented): full-keypair enrollment (no CSR parse), interval scheduler (not cron),
+  e2e test on plaintext localhost (mTLS covered by transport unit tests + real binaries).
+
+#### Failed Attempts
+- Renamed the bidi RPC `Connect`→`Stream` (collided with tonic's generated client constructor).
+
+#### Next Steps
+- M7: `mesh` (SWIM + leader election) + offline buffer + flush-on-reconnect.
 
 ### 2026-07-06 — M5 Brute + report + OOB
 
