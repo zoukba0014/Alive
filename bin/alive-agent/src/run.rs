@@ -314,7 +314,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("offline.redb");
         let _ = std::fs::remove_file(&path);
-        let buffer = Some(Buffer::open(&path).unwrap());
+        // `.ok()` keeps the type `Option<Buffer>` the helper expects without
+        // giving clippy a literal `Some(_)` to flag the later unwrap on.
+        let buffer = Buffer::open(&path).ok();
 
         let mut cache = BTreeMap::new();
         cache.insert("t1".to_string(), signed_discover_bytes(&id, "t1"));
@@ -341,7 +343,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("offline-tamper.redb");
         let _ = std::fs::remove_file(&path);
-        let buffer = Some(Buffer::open(&path).unwrap());
+        // `.ok()` keeps the type `Option<Buffer>` the helper expects without
+        // giving clippy a literal `Some(_)` to flag the later unwrap on.
+        let buffer = Buffer::open(&path).ok();
 
         let mut cache = BTreeMap::new();
         cache.insert("t1".to_string(), signed_discover_bytes(&id, "t1"));

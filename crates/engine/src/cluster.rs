@@ -204,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn cluster_sends_once_but_matches_per_template() {
-        let ts = vec![tmpl("a", "alpha"), tmpl("b", "beta"), tmpl("c", "zzz")];
+        let ts = [tmpl("a", "alpha"), tmpl("b", "beta"), tmpl("c", "zzz")];
         let refs: Vec<&Template> = ts.iter().collect();
         let client = CountingClient {
             sends: AtomicUsize::new(0),
