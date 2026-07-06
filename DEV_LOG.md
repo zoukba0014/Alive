@@ -6,17 +6,46 @@ Purpose: curated handoff state for agents and developers. This is not a raw tran
 
 - Branch: `feature/rust-rewrite`
 - Goal: Rust rewrite of Alive per `ROADMAP.md`, milestone by milestone.
-- Current status: **M8 (hardening & performance) complete — ALL MILESTONES DONE.** Template clustering, bloom/exact target dedup, governor rate limiting, tamper-evident audit hash-chain, criterion benches. System is a usable version.
-- Next action: finalization only (top-level README/usage doc, release build). Optional follow-ups are the deferred items below. No further milestones.
+- Current status: **All milestones M0–M8 done + real end-to-end smoke-tested + mTLS fleet fixed.** Verified on the actual machine (no mocks): HTTP POC scan, port scan, Redis brute (real RESP AUTH), HTML/CSV reports, and full **two-way mTLS** server↔agent (enroll→stream→dispatch→result→audit, hash-chain intact).
+- Next action: none required. Optional non-blocking follow-ups below. Consider opening a PR to `main`.
 - Blockers: none.
-- Relevant files: `crates/engine/src/cluster.rs`, `crates/discovery/src/dedup.rs`, `crates/protocols/src/rate.rs`, `bin/alive-server/src/audit.rs`, `benches/`.
-- Relevant docs: `ROADMAP.md` (plan), `map.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
-- Last test command: `cargo test -q && cargo clippy --workspace`
-- Last test result: 95 tests passed; clippy 0 issues; fmt clean; `cargo bench --no-run` compiles.
-- Docs sync: engine/discovery/protocols/server updated in place; root map current.
-- Deferred (follow-ups, all non-blocking): DNS runner + payload modes (M3); SSH brute (M5); interactsh crypto (M5); csv/html triage annotations (M4); M6 simplifications (full-keypair enroll, interval scheduler, plaintext-localhost e2e); M7 full peer→leader result forwarding (per-agent flush shipped); M8 clustering primitive shipped+tested but `bin/alive` scan loop not yet rewired to use `run_http_cluster` (drop-in ready).
+- Relevant files: `bin/alive-server/src/{lib,main}.rs` (state persistence + bootstrap cert), `bin/alive-agent/src/{run,main}.rs` (bootstrap-cert enroll).
+- Relevant docs: `ROADMAP.md`, `README.md`, `WORKSPACE_SPEC.md`, `GIT_FLOW.md`.
+- Last test command: `cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings`
+- Last test result: 95 tests passed; strict clippy (warnings-as-errors, all targets) exit 0; fmt clean; release build OK; real mTLS 2-process e2e OK.
+- Docs sync: README fleet section + WORKSPACE_SPEC mTLS entry updated for the bootstrap-cert flow.
+- Deferred (follow-ups, all non-blocking): DNS runner + payload modes (M3); SSH brute (M5); interactsh crypto (M5); csv/html triage annotations (M4); interval scheduler (not cron); M7 full peer→leader result forwarding (per-agent flush shipped); M8 `run_http_cluster` primitive shipped+tested but scan loop not yet rewired to it (drop-in ready). **mTLS CA-distribution gap: FIXED** (was a real M6 gap found by real e2e — server now persists CA/signing seed + issues a shared bootstrap client cert; full two-way mTLS verified).
 
 ## Recent Sessions
+
+### 2026-07-07 — Real e2e smoke test + mTLS fleet fix
+
+#### Summary
+- Ran the whole system against real local targets (no mocks); found and fixed a real mTLS gap.
+
+#### What was really tested (not mocked)
+- HTTP POC scan vs a live web server (match + extractor), real port scan/fingerprint, Redis
+  weak-cred brute over real RESP AUTH, HTML/CSV report files, and full two-process fleet e2e.
+
+#### Bug found + fixed
+- **mTLS two-process connection failed** (`transport error`): server generated the CA only
+  in memory (never written out → agents had no CA to trust), and mTLS requires a client cert
+  on the very first enroll connection (chicken-and-egg). Unit tests passed the CA in-process,
+  hiding both.
+- **Fix**: `FleetService::with_state` persists CA (cert+key) + ed25519 signing seed under a
+  `--state-dir` (survives restarts) and writes `ca.pem`; it also issues a shared CA-signed
+  **bootstrap client cert** (`bootstrap.pem`/`.key`). Agents use the bootstrap cert only for
+  the enroll handshake, then stream with their individually-issued cert → full two-way mTLS.
+  Agent gained `--bootstrap-cert`/`--bootstrap-key`; server prints the exact agent command.
+
+#### Decisions
+- Chose the bootstrap-cert approach (single port, preserves two-way mTLS) over dropping to
+  server-auth-only TLS (which would weaken the WORKSPACE_SPEC mTLS control).
+- Secret files (ca.key, server.seed, bootstrap.key) written 0600.
+
+#### Verification
+- Real mTLS 2-process run: enroll→connect→dispatch→result across multiple ticks, reports on
+  disk, audit hash-chain intact. 95 tests; strict clippy (`--all-targets -D warnings`) exit 0; fmt clean.
 
 ### 2026-07-06 — M8 Hardening & performance (final milestone)
 

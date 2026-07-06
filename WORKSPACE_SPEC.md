@@ -41,7 +41,10 @@ than offensive malware. Any change touching the fleet must preserve them:
   agent has no code path to run attacker-supplied shell.
 - **Signed tasks**: every task is signed with the server's ed25519 key; agents
   verify before executing (defends even against a compromised peer relay).
-- **mTLS identity**: each agent has its own certificate issued at enrollment.
+- **mTLS identity**: full two-way mTLS. Agents enroll with a shared, CA-signed
+  bootstrap client cert (used only for the enroll handshake), then stream with
+  their own individually-issued cert. The server persists the CA + signing seed
+  under its state dir so identities survive restarts.
 - **Asset authorization**: tasks carry an authorized scope; targets outside it
   are refused.
 - **Audit**: every dispatched task + result + actor is recorded immutably.

@@ -12,7 +12,7 @@ use alive_proto::{
     agent_message, server_message, task, AgentMessage, EnrollResponse, ServerMessage, Task,
     TaskResult,
 };
-use alive_transport::{issue_leaf, sign_task, Ca, SigningIdentity};
+use alive_transport::{issue_leaf, load_signing_key, sign_task, Ca, SigningIdentity};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
@@ -86,18 +86,105 @@ pub struct FleetService {
 }
 
 impl FleetService {
-    /// Build a service with a fresh CA + signing identity.
+    /// Build a service with an ephemeral CA + signing identity (in-memory,
+    /// nothing persisted). Used by tests. Production servers use
+    /// [`FleetService::with_state`] so the CA and signing key survive restarts
+    /// and the CA PEM is written to disk for agents to trust.
     pub fn new(audit_path: PathBuf, report_dir: PathBuf) -> Result<Self, String> {
         let ca = alive_transport::generate_ca().map_err(|e| e.to_string())?;
+        Ok(Self::from_parts(
+            ca,
+            SigningIdentity::generate(),
+            audit_path,
+            report_dir,
+        ))
+    }
+
+    /// Build a service backed by a persistent state directory.
+    ///
+    /// On first run the CA (cert+key) and the ed25519 signing seed are generated
+    /// and written under `state_dir`; on restart they are reloaded so previously
+    /// enrolled agent certs and previously issued task signatures stay valid.
+    /// The CA certificate is always (re)written to `state_dir/ca.pem` — that is
+    /// the file operators distribute to agents as `--ca-file`.
+    pub fn with_state(
+        state_dir: PathBuf,
+        audit_path: PathBuf,
+        report_dir: PathBuf,
+    ) -> Result<Self, String> {
+        std::fs::create_dir_all(&state_dir).map_err(|e| format!("state dir: {e}"))?;
+        let ca_cert_path = state_dir.join("ca.pem");
+        let ca_key_path = state_dir.join("ca.key");
+        let seed_path = state_dir.join("server.seed");
+
+        let (ca, identity) = if ca_cert_path.exists() && ca_key_path.exists() && seed_path.exists()
+        {
+            let cert_pem =
+                std::fs::read_to_string(&ca_cert_path).map_err(|e| format!("read ca.pem: {e}"))?;
+            let key_pem =
+                std::fs::read_to_string(&ca_key_path).map_err(|e| format!("read ca.key: {e}"))?;
+            let ca = Ca::from_pem(&cert_pem, &key_pem).map_err(|e| e.to_string())?;
+            let seed = std::fs::read(&seed_path).map_err(|e| format!("read server.seed: {e}"))?;
+            let identity = load_signing_key(&seed).map_err(|e| e.to_string())?;
+            (ca, identity)
+        } else {
+            let ca = alive_transport::generate_ca().map_err(|e| e.to_string())?;
+            let identity = SigningIdentity::generate();
+            std::fs::write(&ca_cert_path, ca.ca_cert_pem.as_bytes())
+                .map_err(|e| format!("write ca.pem: {e}"))?;
+            write_secret(&ca_key_path, ca.ca_key_pem.as_bytes())?;
+            write_secret(&seed_path, &identity.secret_bytes())?;
+            (ca, identity)
+        };
+
+        // (Re)issue the shared bootstrap client cert. mTLS requires a client
+        // cert on every connection, but an agent has none until it enrolls —
+        // so agents use this CA-signed bootstrap cert *only* for the enroll
+        // handshake, then switch to their individually-issued cert for the
+        // task stream. It is signed by the same CA, so it always chains cleanly.
+        let (boot_cert, boot_key) = issue_leaf(
+            &ca,
+            "alive-bootstrap",
+            &["localhost".into(), "127.0.0.1".into()],
+        )
+        .map_err(|e| e.to_string())?;
+        let (boot_cert_path, boot_key_path) = Self::bootstrap_files(&state_dir);
+        std::fs::write(&boot_cert_path, boot_cert.as_bytes())
+            .map_err(|e| format!("write bootstrap.pem: {e}"))?;
+        write_secret(&boot_key_path, boot_key.as_bytes())?;
+
+        Ok(Self::from_parts(ca, identity, audit_path, report_dir))
+    }
+
+    /// Path to the CA cert an operator hands to agents (`--ca-file`).
+    pub fn ca_file(state_dir: &std::path::Path) -> PathBuf {
+        state_dir.join("ca.pem")
+    }
+
+    /// Paths to the shared bootstrap client cert + key agents use for the enroll
+    /// handshake (`--bootstrap-cert` / `--bootstrap-key`).
+    pub fn bootstrap_files(state_dir: &std::path::Path) -> (PathBuf, PathBuf) {
+        (
+            state_dir.join("bootstrap.pem"),
+            state_dir.join("bootstrap.key"),
+        )
+    }
+
+    fn from_parts(
+        ca: Ca,
+        identity: SigningIdentity,
+        audit_path: PathBuf,
+        report_dir: PathBuf,
+    ) -> Self {
         let audit = Arc::new(AuditLog::new(audit_path));
-        Ok(Self {
+        Self {
             registry: Arc::new(Registry::new(audit.clone())),
-            identity: Arc::new(SigningIdentity::generate()),
+            identity: Arc::new(identity),
             ca: Arc::new(Mutex::new(ca)),
             audit,
             report_dir,
             agent_seq: Arc::new(Mutex::new(0)),
-        })
+        }
     }
 
     pub fn registry(&self) -> Arc<Registry> {
@@ -137,6 +224,18 @@ impl FleetService {
         sign_task(&self.identity, &mut task);
         task
     }
+}
+
+/// Write a secret file with owner-only permissions (0600 on Unix).
+fn write_secret(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    std::fs::write(path, bytes).map_err(|e| format!("write {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("chmod {}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn task_kind(task: &Task) -> &'static str {

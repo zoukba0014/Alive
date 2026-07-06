@@ -95,14 +95,27 @@ off by default; the cloud provider reads `ANTHROPIC_API_KEY` from the environmen
 ## Fleet usage
 
 ```sh
-# Control plane: schedules + dispatches signed, scoped tasks; audit-logs everything
-alive-server --schedule-secs 3600
+# Control plane (mTLS): on first run, generates + persists the CA, signing key,
+# and a shared bootstrap client cert under --state-dir, and prints the exact
+# agent command (including which files to distribute).
+alive-server --listen 0.0.0.0:50443 --state-dir /var/lib/alive/state --schedule-secs 3600
 alive-server --verify-audit            # verify the tamper-evident audit hash-chain
 
-# Endpoint agent: enrolls, connects over mTLS, executes verified tasks, gossips + buffers
-alive-agent --server https://server:8443 --mesh-bind 0.0.0.0:7946 \
-  --mesh-seed peer1:7946 --buffer-path /var/lib/alive/buffer.redb
+# Distribute these three files (from the server's --state-dir) to each agent:
+#   ca.pem  bootstrap.pem  bootstrap.key
+# Endpoint agent: enrolls (bootstrap cert), then streams with its own issued
+# cert; executes verified tasks, gossips health, buffers offline.
+alive-agent --server https://server:50443 --tls-domain localhost \
+  --ca-file ca.pem --bootstrap-cert bootstrap.pem --bootstrap-key bootstrap.key \
+  --mesh-bind 0.0.0.0:7946 --mesh-seed peer1:7946 \
+  --buffer-path /var/lib/alive/buffer.redb
 ```
+
+> **mTLS bootstrap:** mTLS requires a client cert on every connection, but an
+> agent has none until it enrolls. The server issues a shared, CA-signed
+> **bootstrap cert** used *only* for the enroll handshake; once enrolled, each
+> agent streams with its own individually-issued cert. Full two-way mTLS end to
+> end, no chicken-and-egg.
 
 ## Safety model
 

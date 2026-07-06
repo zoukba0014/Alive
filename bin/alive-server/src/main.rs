@@ -23,6 +23,11 @@ struct Cli {
     /// Directory where ingested findings are written.
     #[arg(long, default_value = "./fleet-reports")]
     reports: PathBuf,
+    /// Persistent state directory: CA (cert+key) and the ed25519 signing seed
+    /// live here and survive restarts. The CA cert is written to
+    /// `<state-dir>/ca.pem` for agents to trust (`--ca-file`).
+    #[arg(long, default_value = "./fleet-state")]
+    state_dir: PathBuf,
     /// Plaintext transport (dev/testing). Omit for mTLS (recommended).
     #[arg(long)]
     insecure: bool,
@@ -69,8 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let addr = cli.listen.parse()?;
-    let service = FleetService::new(cli.audit.clone(), cli.reports.clone())
-        .map_err(|e| format!("service init: {e}"))?;
+    let service = FleetService::with_state(
+        cli.state_dir.clone(),
+        cli.audit.clone(),
+        cli.reports.clone(),
+    )
+    .map_err(|e| format!("service init: {e}"))?;
 
     if let Some(secs) = cli.schedule_secs {
         spawn_scheduler(
@@ -87,6 +96,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.listen,
         if cli.insecure { "plaintext" } else { "mTLS" }
     );
+    if !cli.insecure {
+        let ca = FleetService::ca_file(&cli.state_dir);
+        let (boot_cert, boot_key) = FleetService::bootstrap_files(&cli.state_dir);
+        let port = cli.listen.rsplit(':').next().unwrap_or("50051");
+        eprintln!("[server] CA for agents:        {}", ca.display());
+        eprintln!(
+            "[server] bootstrap cert/key:   {} / {}",
+            boot_cert.display(),
+            boot_key.display()
+        );
+        eprintln!(
+            "[server] agent: alive-agent --server https://<host>:{port} \\\n           --ca-file {} --bootstrap-cert {} --bootstrap-key {} --tls-domain localhost",
+            ca.display(),
+            boot_cert.display(),
+            boot_key.display()
+        );
+    }
 
     let mut builder = Server::builder();
     if !cli.insecure {

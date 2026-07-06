@@ -28,6 +28,11 @@ pub struct AgentConfig {
     pub insecure: bool,
     /// CA PEM (operator-distributed) required for the mTLS enroll bootstrap.
     pub ca_pem: Option<Vec<u8>>,
+    /// Shared bootstrap client cert/key (CA-signed, operator-distributed) used
+    /// only for the enroll handshake — mTLS needs a client cert before the
+    /// agent has its own. After enrolling, the individually-issued cert is used.
+    pub bootstrap_cert_pem: Option<Vec<u8>>,
+    pub bootstrap_key_pem: Option<Vec<u8>>,
     pub tls_domain: String,
     /// Persistent offline buffer path. When set, results are buffered while the
     /// server is unreachable and flushed on reconnect.
@@ -120,12 +125,18 @@ async fn enroll_once(cfg: &AgentConfig) -> Result<EnrollResponse, Box<dyn std::e
             .ca_pem
             .clone()
             .ok_or("mTLS mode requires a CA PEM (--ca-file)")?;
+        // The enroll handshake is full mTLS, so present the shared bootstrap
+        // client cert (the agent has no individual cert yet).
+        let cert = cfg
+            .bootstrap_cert_pem
+            .clone()
+            .ok_or("mTLS enroll requires a bootstrap client cert (--bootstrap-cert)")?;
+        let key = cfg
+            .bootstrap_key_pem
+            .clone()
+            .ok_or("mTLS enroll requires a bootstrap client key (--bootstrap-key)")?;
         Channel::from_shared(cfg.server_url.clone())?
-            .tls_config(
-                tonic::transport::ClientTlsConfig::new()
-                    .ca_certificate(tonic::transport::Certificate::from_pem(ca))
-                    .domain_name(&cfg.tls_domain),
-            )?
+            .tls_config(client_tls(&cert, &key, &ca, &cfg.tls_domain))?
             .connect()
             .await?
     };

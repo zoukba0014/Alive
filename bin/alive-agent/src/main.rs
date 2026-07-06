@@ -24,6 +24,13 @@ struct Cli {
     /// CA PEM to trust for the mTLS enrollment bootstrap.
     #[arg(long)]
     ca_file: Option<PathBuf>,
+    /// Shared bootstrap client cert (PEM) for the mTLS enroll handshake
+    /// (operator-distributed alongside the CA).
+    #[arg(long)]
+    bootstrap_cert: Option<PathBuf>,
+    /// Shared bootstrap client key (PEM) for the mTLS enroll handshake.
+    #[arg(long)]
+    bootstrap_key: Option<PathBuf>,
     /// Expected server certificate domain (SAN) for mTLS.
     #[arg(long, default_value = "localhost")]
     tls_domain: String,
@@ -46,16 +53,23 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let ca_pem = match &cli.ca_file {
-        Some(p) => Some(std::fs::read(p)?),
-        None => None,
+    let read_opt = |p: &Option<PathBuf>| -> std::io::Result<Option<Vec<u8>>> {
+        match p {
+            Some(p) => Ok(Some(std::fs::read(p)?)),
+            None => Ok(None),
+        }
     };
+    let ca_pem = read_opt(&cli.ca_file)?;
+    let bootstrap_cert_pem = read_opt(&cli.bootstrap_cert)?;
+    let bootstrap_key_pem = read_opt(&cli.bootstrap_key)?;
     run_agent(AgentConfig {
         server_url: cli.server,
         agent_name: cli.name,
         template_dir: cli.templates,
         insecure: cli.insecure,
         ca_pem,
+        bootstrap_cert_pem,
+        bootstrap_key_pem,
         tls_domain: cli.tls_domain,
         buffer_path: cli.buffer_path,
         mesh_bind: cli.mesh_bind,
